@@ -1,0 +1,24 @@
+{
+  "overallScore": 82,
+  "streak": 14,
+  "focusHours": 14,
+  "totalHabits": 94,
+  "goals": [
+    { "goalName": "Learning", "category": "Learning", "completionRate": 78, "trend": "up", "hoursLogged": 10, "hoursTarget": 14 },
+    { "goalName": "Fitness", "category": "Fitness", "completionRate": 55, "trend": "down", "hoursLogged": 4, "hoursTarget": 7 },
+    { "goalName": "Work", "category": "Work", "completionRate": 91, "trend": "up", "hoursLogged": 38, "hoursTarget": 40 }
+  ],
+  "deepAnalysis": [
+    { "title": "Morning Routine", "status": "verified", "score": 98 },
+    { "title": "Late Night Deep Work", "status": "warning", "insight": "Productivity drops 40% after 10pm. Consider scheduling deep work before 6pm." },
+    { "title": "Hydration Consistency", "status": "info", "score": 70, "insight": "Set hourly reminders to improve water intake." }
+  ],
+  "timeDistribution": [
+    { "label": "Work", "hours": 38, "color": "#451de3" },
+    { "label": "Learning", "hours": 10, "color": "#006688" },
+    { "label": "Fitness", "hours": 4, "color": "#4b4f52" },
+    { "label": "Wellness", "hours": 2, "color": "#c6bfff" }
+  ],
+  "individualSync": 88,
+  "teamSync": 74
+}

@@ -1,0 +1,12 @@
+{
+  "name": "timixa",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "frontend": "npm run start --workspace=apps/frontend",
+    "backend": "npm run dev --workspace=apps/backend"
+  }
+}

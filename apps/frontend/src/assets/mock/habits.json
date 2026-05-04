@@ -1,0 +1,74 @@
+[
+  {
+    "id": "h1",
+    "title": "Study (2 hrs)",
+    "category": "Learning",
+    "icon": "menu_book",
+    "targetCount": 120,
+    "currentCount": 45,
+    "unit": "min",
+    "goalId": "g1",
+    "streak": 7,
+    "color": "#e4dfff"
+  },
+  {
+    "id": "h2",
+    "title": "Drink Water",
+    "category": "Health",
+    "icon": "water_drop",
+    "targetCount": 10,
+    "currentCount": 4,
+    "unit": "glasses",
+    "goalId": "g2",
+    "streak": 14,
+    "color": "#c2e8ff"
+  },
+  {
+    "id": "h3",
+    "title": "Morning Run",
+    "category": "Fitness",
+    "icon": "directions_run",
+    "targetCount": 5,
+    "currentCount": 5,
+    "unit": "km",
+    "goalId": "g2",
+    "streak": 21,
+    "color": "#e4dfff"
+  },
+  {
+    "id": "h4",
+    "title": "Meditate",
+    "category": "Wellness",
+    "icon": "self_improvement",
+    "targetCount": 20,
+    "currentCount": 20,
+    "unit": "min",
+    "goalId": "g3",
+    "streak": 5,
+    "color": "#c2e8ff"
+  },
+  {
+    "id": "h5",
+    "title": "Read a Book",
+    "category": "Learning",
+    "icon": "auto_stories",
+    "targetCount": 30,
+    "currentCount": 10,
+    "unit": "pages",
+    "goalId": "g1",
+    "streak": 3,
+    "color": "#e4dfff"
+  },
+  {
+    "id": "h6",
+    "title": "Deep Work",
+    "category": "Work",
+    "icon": "laptop",
+    "targetCount": 4,
+    "currentCount": 2,
+    "unit": "hrs",
+    "goalId": "g4",
+    "streak": 9,
+    "color": "#e3e6e9"
+  }
+]

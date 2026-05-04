@@ -1,0 +1,46 @@
+[
+  {
+    "id": "p1",
+    "title": "Website Redesign",
+    "description": "Revamping the core landing pages and design system integration.",
+    "priority": "high",
+    "status": "active",
+    "progress": 68,
+    "dueDate": "2026-05-20",
+    "tags": ["Design", "Frontend"],
+    "color": "#451de3"
+  },
+  {
+    "id": "p2",
+    "title": "Mobile App MVP",
+    "description": "Building the first version of the iOS and Android habit tracker.",
+    "priority": "high",
+    "status": "active",
+    "progress": 42,
+    "dueDate": "2026-06-15",
+    "tags": ["Mobile", "React Native"],
+    "color": "#006688"
+  },
+  {
+    "id": "p3",
+    "title": "API Integration",
+    "description": "Connecting third-party health data APIs and notification services.",
+    "priority": "medium",
+    "status": "active",
+    "progress": 25,
+    "dueDate": "2026-05-30",
+    "tags": ["Backend", "API"],
+    "color": "#4b4f52"
+  },
+  {
+    "id": "p4",
+    "title": "Analytics Dashboard",
+    "description": "Building the insights and reporting module for enterprise clients.",
+    "priority": "medium",
+    "status": "paused",
+    "progress": 15,
+    "dueDate": "2026-07-01",
+    "tags": ["Analytics", "Charts"],
+    "color": "#451de3"
+  }
+]

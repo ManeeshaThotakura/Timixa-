@@ -1,0 +1,5 @@
+[
+  { "id": "ut1", "title": "User interview synthesis", "projectId": "p1", "dueDate": "2026-05-10" },
+  { "id": "ut2", "title": "API schema definition", "projectId": "p3", "dueDate": "2026-05-18" },
+  { "id": "ut3", "title": "Onboarding flow wireframes", "projectId": "p2", "dueDate": "2026-05-15" }
+]

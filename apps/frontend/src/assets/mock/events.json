@@ -1,0 +1,12 @@
+[
+  { "id": "e1", "title": "Deep Work Session", "type": "habit", "date": "2026-05-04", "startTime": "09:00", "endTime": "11:00", "color": "#451de3" },
+  { "id": "e2", "title": "Team Standup", "type": "meeting", "date": "2026-05-04", "startTime": "11:00", "endTime": "11:30", "color": "#006688" },
+  { "id": "e3", "title": "Design Review", "type": "task", "date": "2026-05-04", "startTime": "14:00", "endTime": "15:00", "color": "#4b4f52" },
+  { "id": "e4", "title": "Morning Run", "type": "habit", "date": "2026-05-05", "startTime": "07:00", "endTime": "07:45", "color": "#451de3" },
+  { "id": "e5", "title": "Product Planning", "type": "meeting", "date": "2026-05-05", "startTime": "10:00", "endTime": "11:30", "color": "#006688" },
+  { "id": "e6", "title": "Study Session", "type": "habit", "date": "2026-05-06", "startTime": "08:00", "endTime": "10:00", "color": "#451de3" },
+  { "id": "e7", "title": "Code Review", "type": "task", "date": "2026-05-06", "startTime": "13:00", "endTime": "14:00", "color": "#4b4f52" },
+  { "id": "e8", "title": "Sprint Retrospective", "type": "meeting", "date": "2026-05-07", "startTime": "15:00", "endTime": "16:00", "color": "#006688" },
+  { "id": "e9", "title": "Meditation", "type": "habit", "date": "2026-05-08", "startTime": "07:00", "endTime": "07:20", "color": "#451de3" },
+  { "id": "e10", "title": "Client Demo", "type": "meeting", "date": "2026-05-08", "startTime": "14:00", "endTime": "15:00", "color": "#006688" }
+]

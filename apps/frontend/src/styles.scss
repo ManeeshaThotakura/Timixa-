@@ -1,0 +1,80 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    font-family: 'Inter', sans-serif;
+    background-color: #f9f9fc;
+    color: #1a1c1e;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Manrope', sans-serif;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply bg-white/80 backdrop-blur-xl border border-white/50;
+  }
+
+  .glass-nav {
+    @apply bg-white/90 backdrop-blur-2xl border-t border-white/20;
+  }
+
+  .material-symbols-outlined {
+    font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+    user-select: none;
+  }
+
+  .material-symbols-outlined.filled {
+    font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  }
+
+  .btn-primary {
+    @apply bg-primary-container text-white px-5 py-3 rounded-xl font-semibold
+           active:scale-95 transition-all duration-200 shadow-card;
+  }
+
+  .btn-ghost {
+    @apply text-primary px-5 py-3 rounded-xl font-semibold
+           hover:bg-primary-fixed/30 active:scale-95 transition-all duration-200;
+  }
+
+  .input-ghost {
+    @apply w-full bg-surface-container rounded-xl px-4 py-3 text-on-surface
+           outline-none border-2 border-transparent
+           focus:border-primary-container transition-all duration-200
+           placeholder:text-on-surface-variant;
+  }
+}
+
+/* Route transition animations */
+.route-slide-enter {
+  animation: slideInRight 0.25s ease-out forwards;
+}
+
+.route-slide-leave {
+  animation: slideOutLeft 0.25s ease-in forwards;
+}
+
+@keyframes slideInRight {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+@keyframes slideOutLeft {
+  from { transform: translateX(0);     opacity: 1; }
+  to   { transform: translateX(-100%); opacity: 0; }
+}
+
+/* Scrollbar hide utility */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }

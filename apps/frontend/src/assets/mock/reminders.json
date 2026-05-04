@@ -1,0 +1,56 @@
+[
+  {
+    "id": "r1",
+    "title": "Time to Hydrate!",
+    "description": "You haven't logged water in 2 hours.",
+    "time": "11:00 AM",
+    "type": "smart",
+    "relatedHabitId": "h2",
+    "dismissed": false,
+    "icon": "water_drop",
+    "iconColor": "#006688"
+  },
+  {
+    "id": "r2",
+    "title": "Study Reminder",
+    "description": "Your daily study goal is only 37% complete.",
+    "time": "2:00 PM",
+    "type": "smart",
+    "relatedHabitId": "h1",
+    "dismissed": false,
+    "icon": "menu_book",
+    "iconColor": "#451de3"
+  },
+  {
+    "id": "r3",
+    "title": "Project Deadline Approaching",
+    "description": "Website Redesign is due in 16 days.",
+    "time": "9:00 AM",
+    "type": "smart",
+    "relatedTaskId": "t3",
+    "dismissed": false,
+    "icon": "warning",
+    "iconColor": "#ba1a1a"
+  },
+  {
+    "id": "r4",
+    "title": "Evening Meditation",
+    "description": "Wind down with a 20-minute session.",
+    "time": "8:00 PM",
+    "type": "manual",
+    "relatedHabitId": "h4",
+    "dismissed": false,
+    "icon": "self_improvement",
+    "iconColor": "#4b4f52"
+  },
+  {
+    "id": "r5",
+    "title": "Weekly Review",
+    "description": "Reflect on this week's progress and plan next week.",
+    "time": "5:00 PM",
+    "type": "manual",
+    "dismissed": false,
+    "icon": "event_note",
+    "iconColor": "#006688"
+  }
+]

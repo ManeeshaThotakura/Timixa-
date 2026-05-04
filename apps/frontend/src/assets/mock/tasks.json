@@ -1,0 +1,12 @@
+[
+  { "id": "t1", "projectId": "p1", "title": "User interview synthesis", "status": "todo", "dueDate": "2026-05-10", "assignees": ["u1"], "priority": "high" },
+  { "id": "t2", "projectId": "p1", "title": "Mobile navigation prototype", "status": "todo", "dueDate": "2026-05-12", "assignees": ["u1"], "priority": "medium" },
+  { "id": "t3", "projectId": "p1", "title": "Homepage copy review", "status": "in-progress", "dueDate": "2026-05-08", "assignees": ["u1"], "priority": "high" },
+  { "id": "t4", "projectId": "p1", "title": "Design system tokens update", "status": "in-progress", "dueDate": "2026-05-09", "assignees": ["u1"], "priority": "medium" },
+  { "id": "t5", "projectId": "p1", "title": "Project kick-off meeting", "status": "done", "dueDate": "2026-04-30", "assignees": ["u1"], "priority": "low" },
+  { "id": "t6", "projectId": "p1", "title": "Stakeholder presentation", "status": "done", "dueDate": "2026-05-01", "assignees": ["u1"], "priority": "high" },
+  { "id": "t7", "projectId": "p2", "title": "Onboarding flow wireframes", "status": "todo", "dueDate": "2026-05-15", "assignees": ["u1"], "priority": "high" },
+  { "id": "t8", "projectId": "p2", "title": "Auth module implementation", "status": "in-progress", "dueDate": "2026-05-20", "assignees": ["u1"], "priority": "high" },
+  { "id": "t9", "projectId": "p2", "title": "Push notification setup", "status": "done", "dueDate": "2026-04-28", "assignees": ["u1"], "priority": "medium" },
+  { "id": "t10", "projectId": "p3", "title": "API schema definition", "status": "todo", "dueDate": "2026-05-18", "assignees": ["u1"], "priority": "medium" }
+]

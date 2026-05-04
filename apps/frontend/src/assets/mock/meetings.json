@@ -1,0 +1,22 @@
+[
+  {
+    "id": "m1",
+    "projectId": "p1",
+    "title": "Design Sprint Kickoff",
+    "participants": ["Alex Carter", "Sarah Kim", "Jordan Lee"],
+    "date": "2026-05-10",
+    "startTime": "10:00",
+    "endTime": "11:00",
+    "location": "Zoom"
+  },
+  {
+    "id": "m2",
+    "projectId": "p1",
+    "title": "Stakeholder Review",
+    "participants": ["Alex Carter", "Morgan Blake"],
+    "date": "2026-05-14",
+    "startTime": "14:00",
+    "endTime": "15:00",
+    "location": "Conference Room A"
+  }
+]
