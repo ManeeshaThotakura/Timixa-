@@ -96,6 +96,11 @@ export const routes: Routes = [
             m => m.SmartRemindersComponent
           ),
       },
+      {
+        path: 'new-task',
+        loadComponent: () =>
+          import('./features/new-task/new-task.component').then(m => m.NewTaskComponent),
+      },
       { path: '', redirectTo: 'dashboard', pathMatch: 'full' },
     ],
   },

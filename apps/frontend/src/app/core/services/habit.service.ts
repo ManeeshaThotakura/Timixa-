@@ -40,6 +40,26 @@ export class HabitService {
     this.incrementHabit(id);
   }
 
+  addQuickTask(title: string): void {
+    this.addTask(title, 'Task', 1, 'time');
+  }
+
+  addTask(title: string, category: string, targetCount: number, unit: string): void {
+    const newHabit: Habit = {
+      id: Date.now().toString(),
+      title,
+      category,
+      icon: '✅',
+      targetCount,
+      currentCount: 0,
+      unit,
+      goalId: '',
+      streak: 0,
+      color: '#5e43fb',
+    };
+    this._habits.update(habits => [...habits, newHabit]);
+  }
+
   progressPercent(habit: Habit): number {
     return Math.min(100, Math.round((habit.currentCount / habit.targetCount) * 100));
   }

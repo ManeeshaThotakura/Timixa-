@@ -1,6 +1,7 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
 import { HabitService } from '../../../core/services/habit.service';
 import { AuthService } from '../../../core/services/auth.service';
 import { HabitCardComponent } from '../../../shared/components/habit-card/habit-card.component';
@@ -76,37 +77,18 @@ import { FabComponent } from '../../../shared/components/fab/fab.component';
 
     <!-- FAB -->
     <div class="fixed bottom-28 right-6 z-40">
-      <app-fab (clicked)="showModal = true" />
-    </div>
-
-    <!-- Create Task Modal -->
-    <div *ngIf="showModal"
-         class="fixed inset-0 z-50 flex items-end justify-center"
-         (click)="showModal = false">
-      <div class="absolute inset-0 bg-black/30 backdrop-blur-sm"></div>
-      <div class="relative bg-surface-container-lowest rounded-t-[28px] w-full p-6 pb-10 shadow-card-active"
-           (click)="$event.stopPropagation()">
-        <div class="w-12 h-1 rounded-full bg-outline-variant mx-auto mb-6"></div>
-        <h3 class="font-manrope font-bold text-h2 text-on-surface mb-5">Quick Add</h3>
-        <input type="text" [(ngModel)]="newTaskTitle" placeholder="What do you want to accomplish?"
-               class="input-ghost mb-4" />
-        <div class="flex gap-3">
-          <button (click)="showModal = false" class="btn-ghost flex-1">Cancel</button>
-          <button (click)="addTask()" class="btn-primary flex-1">Add Task</button>
-        </div>
-      </div>
+      <app-fab (clicked)="openNewTask()" />
     </div>
   `,
 })
 export class TodayDashboardComponent implements OnInit {
   private habitService = inject(HabitService);
-  private authService = inject(AuthService);
+  private authService  = inject(AuthService);
+  private router       = inject(Router);
 
-  habits = this.habitService.habits;
+  habits   = this.habitService.habits;
   progress = this.habitService.todayProgress;
-  user = this.authService.currentUser;
-  showModal = false;
-  newTaskTitle = '';
+  user     = this.authService.currentUser;
 
   get greeting(): string {
     const h = new Date().getHours();
@@ -135,8 +117,5 @@ export class TodayDashboardComponent implements OnInit {
     this.habitService.incrementHabit(id);
   }
 
-  addTask(): void {
-    this.newTaskTitle = '';
-    this.showModal = false;
-  }
+  openNewTask(): void { this.router.navigate(['/new-task']); }
 }

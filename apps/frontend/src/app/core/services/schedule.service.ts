@@ -64,6 +64,10 @@ export class ScheduleService {
     this._events.update(e => [...e, event]);
   }
 
+  addEvent(event: ScheduledEvent): void {
+    this._events.update(e => [...e, event]);
+  }
+
   getMeetingsByProject(projectId: string): Meeting[] {
     return this._meetings().filter(m => m.projectId === projectId);
   }
