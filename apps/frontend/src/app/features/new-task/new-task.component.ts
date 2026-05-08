@@ -2,6 +2,8 @@ import { Component, signal, computed, inject } from '@angular/core';
 import { CommonModule, Location } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HabitService } from '../../core/services/habit.service';
+import { SchedulePickerComponent } from '../../shared/components/schedule-picker/schedule-picker.component';
+import { ScheduleConfig, defaultScheduleConfig } from '../../core/models/schedule-config.model';
 
 const GOAL_ICONS: Record<string, string> = {
   Fitness: '🏃‍♂️', Learning: '📚', Health: '🧘‍♀️',
@@ -11,7 +13,7 @@ const GOAL_ICONS: Record<string, string> = {
 @Component({
   selector: 'app-new-task',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, SchedulePickerComponent],
   template: `
     <!-- Header -->
     <header class="bg-white/80 backdrop-blur-xl flex justify-between items-center px-6 py-4 w-full sticky top-0 z-50 shadow-[0px_8px_24px_rgba(94,67,251,0.04)]">
@@ -175,20 +177,48 @@ const GOAL_ICONS: Record<string, string> = {
 
       </section>
 
-      <!-- Section 5: Schedule -->
+      <!-- Section 5: Schedule (collapsible accordion) -->
       <section>
-        <div (click)="toggleSchedule()"
-             class="flex justify-between items-center p-4 bg-surface-container-lowest rounded-[20px] border border-outline-variant/20 shadow-sm cursor-pointer active:bg-surface-container-high transition-colors">
-          <div class="flex items-center gap-3">
-            <span class="material-symbols-outlined text-on-surface-variant">calendar_month</span>
-            <span class="font-semibold text-on-surface-variant">
-              {{ isScheduled() ? 'Scheduled for today' : 'Schedule this task' }}
+        <div class="bg-surface-container-lowest rounded-[20px] border border-outline-variant/20 shadow-sm overflow-hidden">
+
+          <!-- Accordion trigger -->
+          <button type="button" (click)="toggleSchedule()"
+                  class="w-full flex justify-between items-center p-4 active:bg-surface-container-high transition-colors">
+            <div class="flex items-center gap-3 text-left min-w-0 flex-1">
+              <span class="material-symbols-outlined flex-shrink-0"
+                    [class.text-primary]="isScheduled()"
+                    [class.text-on-surface-variant]="!isScheduled()">
+                calendar_month
+              </span>
+              <div class="min-w-0">
+                <p class="font-semibold"
+                   [class.text-primary]="isScheduled()"
+                   [class.text-on-surface-variant]="!isScheduled()">
+                  {{ isScheduled() ? 'Schedule set' : 'Schedule this task' }}
+                </p>
+                <p *ngIf="isScheduled() && scheduleConfig() as cfg"
+                   class="text-[12px] text-on-surface-variant truncate">
+                  {{ scheduleSummary() }}
+                </p>
+              </div>
+            </div>
+            <span class="material-symbols-outlined text-outline transition-transform duration-200 flex-shrink-0"
+                  [style.transform]="isScheduled() ? 'rotate(180deg)' : 'rotate(0deg)'">
+              expand_more
             </span>
+          </button>
+
+          <!-- Accordion content (initially hidden) -->
+          <div *ngIf="isScheduled()" class="px-4 pb-4 pt-1 border-t border-outline-variant/10">
+            <app-schedule-picker
+              [value]="scheduleConfig()"
+              (valueChange)="scheduleConfig.set($event)" />
+
+            <button type="button" (click)="clearSchedule()"
+                    class="w-full mt-4 py-2 text-[13px] font-semibold text-error hover:bg-error-container/30 rounded-xl transition-colors">
+              Remove schedule
+            </button>
           </div>
-          <span class="material-symbols-outlined text-outline transition-transform duration-200"
-                [style.transform]="isScheduled() ? 'rotate(180deg)' : 'rotate(0deg)'">
-            expand_more
-          </span>
         </div>
       </section>
 
@@ -338,6 +368,7 @@ export class NewTaskComponent {
   notifyAtEnd       = signal<boolean>(false);
   nightReminder     = signal<boolean>(true);
   isScheduled       = signal<boolean>(false);
+  scheduleConfig    = signal<ScheduleConfig | null>(null);
   showGoalModal     = signal<boolean>(false);
   newGoalName       = signal<string>('');
 
@@ -385,7 +416,36 @@ export class NewTaskComponent {
   decrement():     void { this.targetCount.update(n => Math.max(1, n - 1)); }
   incrementTime(): void { this.targetMinutes.update(n => n + 15); }
   decrementTime(): void { this.targetMinutes.update(n => Math.max(15, n - 15)); }
-  toggleSchedule():void { this.isScheduled.update(v => !v); }
+
+  toggleSchedule(): void {
+    const next = !this.isScheduled();
+    this.isScheduled.set(next);
+    if (next && !this.scheduleConfig()) {
+      this.scheduleConfig.set({ ...defaultScheduleConfig });
+    }
+  }
+
+  clearSchedule(): void {
+    this.isScheduled.set(false);
+    this.scheduleConfig.set(null);
+  }
+
+  scheduleSummary(): string {
+    const c = this.scheduleConfig();
+    if (!c) return '';
+    const unit = c.frequency === 'daily'   ? 'day'
+               : c.frequency === 'weekly'  ? 'week'
+               : c.frequency === 'monthly' ? 'month'
+               : 'year';
+    const every = c.interval > 1 ? `Every ${c.interval} ${unit}s` : `Every ${unit}`;
+    if (c.frequency === 'daily' && c.dailyOption && c.dailyOption !== 'every-day') {
+      return `${every} • ${c.dailyOption.replace('-', ' ')}`;
+    }
+    if (c.frequency === 'weekly' && c.weeklyDays?.length) {
+      return `${every} • ${c.weeklyDays.map(d => d.toUpperCase()).join(' ')}`;
+    }
+    return every;
+  }
 
   addGoal(): void {
     const name = this.newGoalName().trim();

@@ -1,5 +1,6 @@
-import { Component, OnInit, OnDestroy, inject, signal, NgZone } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, signal, computed, NgZone, ViewChild, ElementRef } from '@angular/core';
 import { CommonModule, DOCUMENT } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { ScheduleService } from '../../../core/services/schedule.service';
 import { ScheduledEvent, UnscheduledTask } from '../../../core/models/schedule.model';
@@ -10,7 +11,7 @@ const DAY_ABBR = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
 @Component({
   selector: 'app-schedule-week',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, FormsModule],
   template: `
     <!-- Segmented Control -->
     <div class="px-margin-page mt-stack-md">
@@ -23,6 +24,22 @@ const DAY_ABBR = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
                   : 'font-medium text-on-surface-variant hover:text-on-surface'">
           {{ v.label }}
         </button>
+      </div>
+    </div>
+
+    <!-- Conflict warning -->
+    <div *ngIf="weekConflictCount > 0" class="px-margin-page mt-stack-md">
+      <div class="rounded-2xl p-3 flex items-center gap-2.5 border"
+           style="background:rgba(186,26,26,0.08); border-color:rgba(186,26,26,0.25);">
+        <span class="material-symbols-outlined text-[20px] flex-shrink-0" style="color:#ba1a1a;">warning</span>
+        <div class="min-w-0 flex-1">
+          <p class="text-[13px] font-bold" style="color:#ba1a1a;">
+            {{ weekConflictCount }} time {{ weekConflictCount === 1 ? 'conflict' : 'conflicts' }} this week
+          </p>
+          <p class="text-[11px] text-on-surface-variant leading-tight">
+            Overlapping tasks share their slot side-by-side
+          </p>
+        </div>
       </div>
     </div>
 
@@ -76,27 +93,41 @@ const DAY_ABBR = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
       </div>
     </section>
 
-    <!-- Week navigation -->
-    <div class="px-margin-page mt-stack-md flex items-center justify-between">
+    <!-- Week navigation + zoom -->
+    <div class="px-margin-page mt-stack-md flex items-center gap-2">
       <button (click)="prevWeek()"
-              class="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center active:scale-90 transition-transform">
+              class="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center active:scale-90 transition-transform flex-shrink-0">
         <span class="material-symbols-outlined text-[18px]">chevron_left</span>
       </button>
-      <span class="text-sm font-semibold text-on-surface">{{ weekLabel }}</span>
+      <span class="text-sm font-semibold text-on-surface flex-1 text-center truncate">{{ weekLabel }}</span>
       <button (click)="nextWeek()"
-              class="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center active:scale-90 transition-transform">
+              class="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center active:scale-90 transition-transform flex-shrink-0">
         <span class="material-symbols-outlined text-[18px]">chevron_right</span>
       </button>
+      <div class="flex items-center gap-0.5 ml-1 pl-2 border-l border-slate-200 flex-shrink-0">
+        <button (click)="zoomOut()" [disabled]="!canZoomOut"
+                class="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center active:scale-90 transition-transform disabled:opacity-30">
+          <span class="material-symbols-outlined text-[16px]">zoom_out</span>
+        </button>
+        <span class="text-[10px] font-bold text-on-surface-variant min-w-[30px] text-center">{{ zoomPct }}%</span>
+        <button (click)="zoomIn()" [disabled]="!canZoomIn"
+                class="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center active:scale-90 transition-transform disabled:opacity-30">
+          <span class="material-symbols-outlined text-[16px]">zoom_in</span>
+        </button>
+      </div>
     </div>
 
-    <!-- 7-day × 24h time grid -->
-    <div class="mt-stack-md overflow-x-auto" style="-ms-overflow-style:none;scrollbar-width:none;">
+    <!-- 7-day × 24h time grid (own scroll context so sticky header/column actually pin) -->
+    <div #gridScroll class="mt-stack-md overflow-auto border-t border-b border-slate-100"
+         (click)="onGridClick($event)"
+         style="-ms-overflow-style:none;scrollbar-width:none; max-height:calc(100vh - 280px); min-height:380px; overscroll-behavior: contain;">
       <div [style.minWidth.px]="48 + weekDays.length * COL_W">
 
         <!-- Day header row -->
         <div class="flex sticky top-0 z-20 bg-white/95 backdrop-blur-sm border-b border-slate-100">
-          <div class="flex-shrink-0 border-r border-slate-100" [style.width.px]="48"></div>
-          <div *ngFor="let day of weekDays"
+          <div class="flex-shrink-0 border-r border-slate-100 sticky left-0 z-30 bg-white"
+               [style.width.px]="48"></div>
+          <div *ngFor="let day of weekDays; trackBy: trackByDateStr"
                class="flex-shrink-0 text-center py-2 border-r border-slate-100"
                [style.width.px]="COL_W"
                [style.background]="isToday(day.date) ? 'rgba(94,67,251,0.05)' : ''">
@@ -112,7 +143,7 @@ const DAY_ABBR = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
         </div>
 
         <!-- Hour rows -->
-        <div *ngFor="let hour of hours" class="flex" [style.height.px]="ROW_H">
+        <div *ngFor="let hour of hours; trackBy: trackByHour" class="flex" [style.height.px]="ROW_H">
 
           <!-- Hour label (sticky left) -->
           <div class="flex-shrink-0 border-r border-slate-100 text-[10px] text-slate-400 pt-1 px-1 font-medium bg-white"
@@ -122,7 +153,7 @@ const DAY_ABBR = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
           </div>
 
           <!-- Day cells -->
-          <div *ngFor="let day of weekDays"
+          <div *ngFor="let day of weekDays; trackBy: trackByDateStr"
                class="flex-shrink-0 border-t border-r border-slate-100 relative"
                [style.width.px]="COL_W"
                [style.height.px]="ROW_H"
@@ -140,20 +171,45 @@ const DAY_ABBR = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
               <span class="text-[9px] font-bold text-primary">Drop</span>
             </div>
 
-            <!-- Events in this cell -->
-            <div *ngFor="let evt of getEventsForCell(hour, day.dateStr)"
-                 class="absolute inset-x-1 top-1 rounded-md px-1.5 py-1 border-l-2 overflow-hidden"
-                 [style.height.px]="getCellEventHeight(evt.startTime, evt.endTime)"
+            <!-- Events in this cell (same layout as day view: drag + title + time + resize) -->
+            <!-- z-index keeps multi-hour events clickable beyond their parent cell — without it,
+                 cells in the rows below cover the overflow region and steal pointer events. -->
+            <div *ngFor="let evt of getEventsForCell(hour, day.dateStr); trackBy: trackByEventId"
+                 [attr.data-event-id]="evt.id"
+                 class="absolute rounded-md pl-1 pr-1.5 flex items-center gap-1 border-l-2 overflow-hidden cursor-pointer select-none transition-shadow"
+                 [class.cursor-grab]="selectedEventId() === evt.id"
+                 [class.active:cursor-grabbing]="selectedEventId() === evt.id"
+                 style="touch-action: none;"
+                 [style.zIndex]="movingEventId() === evt.id ? 8 : (selectedEventId() === evt.id ? 7 : 6)"
+                 [style.boxShadow]="selectedEventId() === evt.id
+                   ? '0 0 0 2px #5e43fb, 0 8px 20px rgba(94,67,251,0.25)'
+                   : '0 1px 4px rgba(0,0,0,0.06)'"
+                 [ngStyle]="getCellEventStyle(evt, day.dateStr)"
+                 [style.opacity]="movingEventId() === evt.id ? '0.35' : '1'"
                  [style.background]="getEventBg(evt.type)"
-                 [style.borderLeftColor]="getEventBorder(evt.type, evt.color)">
-              <p class="text-[10px] font-bold truncate leading-tight"
-                 [style.color]="getEventBorder(evt.type, evt.color)">
+                 [style.borderLeftColor]="getEventBorder(evt.type, evt.color)"
+                 (mousedown)="onEventDown($event, evt)"
+                 (touchstart)="onEventDown($event, evt)">
+              <span class="material-symbols-outlined text-[13px] opacity-70 flex-shrink-0 -ml-1 relative z-10 leading-none pointer-events-none"
+                    [style.color]="getEventBorder(evt.type, evt.color)">
+                drag_indicator
+              </span>
+              <span class="text-[10px] font-bold truncate flex-1 leading-tight pointer-events-none"
+                    [style.color]="getEventBorder(evt.type, evt.color)">
                 {{ evt.title }}
-              </p>
-              <p class="text-[9px] leading-tight"
-                 [style.color]="getEventBorder(evt.type, evt.color) + 'aa'">
-                {{ evt.startTime }}
-              </p>
+              </span>
+              <span class="text-[9px] font-medium flex-shrink-0 leading-tight whitespace-nowrap pointer-events-none"
+                    [style.color]="getEventBorder(evt.type, evt.color)">
+                {{ resizingEventId() === evt.id ? resizingTimeLabel() : evt.startTime + '–' + evt.endTime }}
+              </span>
+              <!-- Resize handle (off the left edge so it never overlaps the drag indicator) -->
+              <div class="absolute bottom-0 left-8 right-1 h-3 flex items-center justify-center cursor-ns-resize hover:bg-primary/10 transition-colors"
+                   data-resize-handle
+                   style="touch-action: none;"
+                   (mousedown)="onResizeStart($event, evt)"
+                   (touchstart)="onResizeStart($event, evt)">
+                <div class="w-5 h-0.5 rounded-full bg-on-surface-variant/30"></div>
+              </div>
             </div>
           </div>
         </div>
@@ -182,6 +238,59 @@ const DAY_ABBR = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
             style="background:linear-gradient(135deg,#5e43fb,#00c1fd); box-shadow:0 8px 24px rgba(94,67,251,0.3);">
       <span class="material-symbols-outlined text-2xl">add</span>
     </button>
+
+    <!-- Edit schedule modal (long-press) -->
+    <div *ngIf="editingEvent()"
+         class="fixed inset-0 z-[100] flex items-end sm:items-center justify-center"
+         (click)="closeEditModal()">
+      <div class="absolute inset-0 bg-on-surface/30 backdrop-blur-sm"></div>
+      <div class="relative bg-surface-container-lowest rounded-t-[28px] sm:rounded-[28px] w-full sm:max-w-md p-6 pb-8"
+           (click)="$event.stopPropagation()">
+        <div class="w-12 h-1 rounded-full bg-outline-variant mx-auto mb-5 sm:hidden"></div>
+        <h3 class="font-bold text-[20px] text-on-surface mb-1 font-manrope">Edit schedule</h3>
+        <p class="text-[13px] text-on-surface-variant mb-5 truncate">{{ editingEvent()?.title }}</p>
+
+        <div class="mb-3 min-w-0">
+          <label class="block text-[10px] font-bold text-outline uppercase ml-1 mb-1">Date</label>
+          <div class="flex items-center gap-1.5 px-2.5 py-2.5 bg-surface-container-low rounded-xl min-w-0">
+            <span class="material-symbols-outlined text-on-surface-variant text-[16px] flex-shrink-0">event</span>
+            <input type="date" [(ngModel)]="editDate"
+                   class="flex-1 min-w-0 w-full bg-transparent border-none focus:ring-0 text-[14px] p-0" />
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3 mb-5">
+          <div class="min-w-0">
+            <label class="block text-[10px] font-bold text-outline uppercase ml-1 mb-1">Start</label>
+            <div class="flex items-center gap-1.5 px-2.5 py-2.5 bg-surface-container-low rounded-xl min-w-0">
+              <span class="material-symbols-outlined text-on-surface-variant text-[16px] flex-shrink-0">schedule</span>
+              <input type="time" [(ngModel)]="editStart"
+                     class="flex-1 min-w-0 w-full bg-transparent border-none focus:ring-0 text-[14px] p-0" />
+            </div>
+          </div>
+          <div class="min-w-0">
+            <label class="block text-[10px] font-bold text-outline uppercase ml-1 mb-1">End</label>
+            <div class="flex items-center gap-1.5 px-2.5 py-2.5 bg-surface-container-low rounded-xl min-w-0">
+              <span class="material-symbols-outlined text-on-surface-variant text-[16px] flex-shrink-0">schedule</span>
+              <input type="time" [(ngModel)]="editEnd"
+                     class="flex-1 min-w-0 w-full bg-transparent border-none focus:ring-0 text-[14px] p-0" />
+            </div>
+          </div>
+        </div>
+
+        <div class="flex gap-3">
+          <button (click)="closeEditModal()"
+                  class="flex-1 py-3 text-on-surface-variant font-semibold rounded-xl bg-surface-container hover:bg-surface-container-high transition-colors">
+            Cancel
+          </button>
+          <button (click)="saveEditModal()"
+                  class="flex-1 py-3 text-white font-semibold rounded-xl active:scale-95 transition-all"
+                  style="background:#5e43fb; box-shadow:0 4px 12px rgba(94,67,251,0.25);">
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
   `,
 })
 export class ScheduleWeekComponent implements OnInit, OnDestroy {
@@ -190,8 +299,24 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
   private zone = inject(NgZone);
   private doc = inject(DOCUMENT);
 
-  readonly COL_W = 110;
-  readonly ROW_H = 64;
+  // Zoom: 1.0 = 100% (COL_W=110, ROW_H=64). Range 0.6 — 2.0.
+  private readonly BASE_COL_W = 110;
+  private readonly BASE_ROW_H = 64;
+  private zoomFactor = 1;
+  get COL_W(): number { return Math.round(this.BASE_COL_W * this.zoomFactor); }
+  get ROW_H(): number { return Math.round(this.BASE_ROW_H * this.zoomFactor); }
+  get zoomPct(): number { return Math.round(this.zoomFactor * 100); }
+  get canZoomIn(): boolean { return this.zoomFactor < 2; }
+  get canZoomOut(): boolean { return this.zoomFactor > 0.6; }
+  zoomIn(): void {
+    if (!this.canZoomIn) return;
+    this.zoomFactor = Math.min(2, +(this.zoomFactor * 1.25).toFixed(3));
+  }
+  zoomOut(): void {
+    if (!this.canZoomOut) return;
+    this.zoomFactor = Math.max(0.6, +(this.zoomFactor / 1.25).toFixed(3));
+  }
+
   hours = HOURS;
   unplannedOpen = true;
   weekStart = this.getMonday(new Date());
@@ -202,7 +327,9 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
     { label: 'Month', route: '/schedule/month' },
   ];
 
-  unscheduledTasks = this.scheduleService.unscheduledTasks;
+  unscheduledTasks = computed(() =>
+    this.scheduleService.unscheduledTasks().filter(t => t.remainingMinutes > 0),
+  );
   draggingTask  = signal<UnscheduledTask | null>(null);
   dragOverHour  = signal<number | null>(null);
   dragOverDate  = signal<string | null>(null);
@@ -213,6 +340,51 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
   private touchDropDate: string | null = null;
   private readonly boundTouchMove = (e: TouchEvent) => this.onTouchMove(e);
   private readonly boundTouchEnd  = (e: TouchEvent) => this.onTouchEnd(e);
+
+  // Pointer-drag (click-or-move) state
+  private moveDrag: {
+    evt: ScheduledEvent;
+    startX: number; startY: number;
+    isDragging: boolean;
+    hoverHour: number | null;
+    hoverDate: string | null;
+    ghost: HTMLElement | null;
+  } | null = null;
+  movingEventId = signal<string | null>(null);
+  selectedEventId = signal<string | null>(null);
+  private readonly boundMoveTrack = (e: MouseEvent | TouchEvent) => this.onMoveTrack(e);
+  private readonly boundMoveEnd = (e: MouseEvent | TouchEvent) => this.onMoveEnd(e);
+
+  // Resize state
+  resizingEventId = signal<string | null>(null);
+  resizingHeight = signal<number>(0);
+  private resizeStartY = 0;
+  private resizeStartHeight = 0;
+  private resizeEvent: ScheduledEvent | null = null;
+  private readonly boundResizeMove = (e: MouseEvent | TouchEvent) => this.onResizeMove(e);
+  private readonly boundResizeEnd = (e: MouseEvent | TouchEvent) => this.onResizeEnd(e);
+
+  resizingTimeLabel = computed(() => {
+    if (!this.resizeEvent) return '';
+    const minutes = this.pixelsToMinutes(this.resizingHeight());
+    const end = this.addMinutesToTime(this.resizeEvent.startTime, minutes);
+    return `${this.resizeEvent.startTime}–${end}`;
+  });
+
+  // Grid lock + auto-pan during gestures
+  @ViewChild('gridScroll') gridScrollRef?: ElementRef<HTMLElement>;
+  private get gridScrollEl(): HTMLElement | null {
+    return this.gridScrollRef?.nativeElement ?? null;
+  }
+  private currentDragXY: { x: number; y: number } | null = null;
+  private autoPanRaf: number | null = null;
+  private readonly wheelBlocker = (e: Event) => e.preventDefault();
+
+  // Edit modal state
+  editingEvent = signal<ScheduledEvent | null>(null);
+  editDate = '';
+  editStart = '';
+  editEnd = '';
 
   get weekDays() {
     return Array.from({ length: 7 }, (_, i) => {
@@ -245,7 +417,17 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void { this.scheduleService.load(); }
-  ngOnDestroy(): void { this.cleanupTouch(); }
+  ngOnDestroy(): void {
+    this.cleanupTouch();
+    this.cancelMoveDrag();
+    this.stopAutoPan();
+    this.unlockGrid();
+    this.doc.removeEventListener('mousemove', this.boundResizeMove as EventListener);
+    this.doc.removeEventListener('mouseup', this.boundResizeEnd as EventListener);
+    this.doc.removeEventListener('touchmove', this.boundResizeMove as EventListener);
+    this.doc.removeEventListener('touchend', this.boundResizeEnd as EventListener);
+    this.doc.removeEventListener('touchcancel', this.boundResizeEnd as EventListener);
+  }
 
   isToday(date: Date): boolean {
     return date.toDateString() === new Date().toDateString();
@@ -255,15 +437,126 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
     return `${h.toString().padStart(2, '0')}:00`;
   }
 
+  // Cached buckets — recompute only when events signal changes, not every CD cycle.
+  private allEventsByCell = computed(() => {
+    const events = this.scheduleService.events();
+    const byCell = new Map<string, ScheduledEvent[]>();
+    for (const evt of events) {
+      const hour = parseInt(evt.startTime.split(':')[0], 10);
+      const key = `${evt.date}#${hour}`;
+      let bucket = byCell.get(key);
+      if (!bucket) { bucket = []; byCell.set(key, bucket); }
+      bucket.push(evt);
+    }
+    return byCell;
+  });
+
+  private allLayouts = computed(() => {
+    const events = this.scheduleService.events();
+    const byDate = new Map<string, ScheduledEvent[]>();
+    for (const evt of events) {
+      let bucket = byDate.get(evt.date);
+      if (!bucket) { bucket = []; byDate.set(evt.date, bucket); }
+      bucket.push(evt);
+    }
+    const layouts = new Map<string, Map<string, { col: number; count: number }>>();
+    for (const [date, dayEvents] of byDate) {
+      layouts.set(date, this.computeLayout(dayEvents));
+    }
+    return layouts;
+  });
+
   getEventsForCell(hour: number, dateStr: string): ScheduledEvent[] {
-    return this.scheduleService.getByDate(dateStr)
-      .filter(e => parseInt(e.startTime.split(':')[0], 10) === hour);
+    return this.allEventsByCell().get(`${dateStr}#${hour}`) ?? [];
   }
+
+  trackByEventId(_i: number, evt: ScheduledEvent): string { return evt.id; }
+  trackByDateStr(_i: number, day: { dateStr: string }): string { return day.dateStr; }
+  trackByHour(_i: number, hour: number): number { return hour; }
 
   getCellEventHeight(startTime: string, endTime: string): number {
     const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
-    return Math.max(28, Math.min(this.ROW_H - 4,
-      ((toMin(endTime) - toMin(startTime)) / 60) * this.ROW_H - 4));
+    return Math.max(28, ((toMin(endTime) - toMin(startTime)) / 60) * this.ROW_H - 4);
+  }
+
+  // ── Overlap layout ──────────────────────────────────────────────────
+  private toMin(t: string): number {
+    const [h, m] = t.split(':').map(Number);
+    return h * 60 + m;
+  }
+
+  private computeLayout(events: ScheduledEvent[]): Map<string, { col: number; count: number }> {
+    const result = new Map<string, { col: number; count: number }>();
+    if (events.length === 0) return result;
+    const sorted = [...events].sort((a, b) => this.toMin(a.startTime) - this.toMin(b.startTime));
+    let cluster: ScheduledEvent[] = [];
+    let clusterEnd = -1;
+    const flush = () => {
+      if (!cluster.length) return;
+      const cols: number[] = [];
+      const assigns: number[] = [];
+      for (const evt of cluster) {
+        const start = this.toMin(evt.startTime);
+        let assigned = -1;
+        for (let i = 0; i < cols.length; i++) {
+          if (cols[i] <= start) { assigned = i; break; }
+        }
+        if (assigned === -1) { assigned = cols.length; cols.push(0); }
+        cols[assigned] = this.toMin(evt.endTime);
+        assigns.push(assigned);
+      }
+      const count = cols.length;
+      cluster.forEach((evt, i) => result.set(evt.id, { col: assigns[i], count }));
+    };
+    for (const evt of sorted) {
+      const s = this.toMin(evt.startTime);
+      const e = this.toMin(evt.endTime);
+      if (s < clusterEnd) {
+        cluster.push(evt);
+        clusterEnd = Math.max(clusterEnd, e);
+      } else {
+        flush();
+        cluster = [evt];
+        clusterEnd = e;
+      }
+    }
+    flush();
+    return result;
+  }
+
+  getDayLayout(dateStr: string): Map<string, { col: number; count: number }> {
+    return this.allLayouts().get(dateStr) ?? new Map();
+  }
+
+  get weekConflictCount(): number {
+    let n = 0;
+    for (const day of this.weekDays) {
+      this.getDayLayout(day.dateStr).forEach(l => { if (l.count > 1) n++; });
+    }
+    return n;
+  }
+
+  getCellEventStyle(evt: ScheduledEvent, dateStr: string): Record<string, string> {
+    const isResizing = this.resizingEventId() === evt.id;
+    const height = isResizing
+      ? this.resizingHeight()
+      : this.getCellEventHeight(evt.startTime, evt.endTime);
+    const layout = this.getDayLayout(dateStr).get(evt.id);
+    const style: Record<string, string> = {
+      top: '4px',
+      height: `${height}px`,
+    };
+    if (!layout || layout.count <= 1) {
+      style['left'] = '4px';
+      style['right'] = '4px';
+      style['width'] = 'auto';
+      return style;
+    }
+    const widthPct = 100 / layout.count;
+    style['left'] = `calc(2px + ${layout.col * widthPct}%)`;
+    style['width'] = `calc(${widthPct}% - 4px)`;
+    style['right'] = 'auto';
+    return style;
   }
 
   getEventBg(type: string): string {
@@ -412,8 +705,15 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
   }
 
   private scheduleAt(task: UnscheduledTask, hour: number, dateStr: string): void {
+    const remaining = task.remainingMinutes;
+    if (remaining <= 0) return;
+
     const start = `${hour.toString().padStart(2, '0')}:00`;
-    const end   = `${(hour + 1).toString().padStart(2, '0')}:00`;
+    const total = hour * 60 + remaining;
+    const eh = Math.min(23, Math.floor(total / 60));
+    const em = total % 60;
+    const end = `${eh.toString().padStart(2, '0')}:${em.toString().padStart(2, '0')}`;
+
     this.scheduleService.addEvent({
       id: `task-${task.id}-${Date.now()}`,
       title: task.title,
@@ -422,8 +722,362 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
       startTime: start,
       endTime: end,
       color: '#451de3',
+      sourceTaskId: task.id,
     });
-    this.scheduleService.scheduleTask(task.id);
+    this.scheduleService.scheduleTask(task.id, remaining);
+  }
+
+  // ── Pointer interaction: select → edit/move ─────────────────────────
+  onEventDown(event: MouseEvent | TouchEvent, evt: ScheduledEvent): void {
+    if (this.moveDrag) this.cancelMoveDrag();
+
+    event.stopPropagation();
+    if ('touches' in event) event.preventDefault();
+
+    // First tap on an unselected event just selects it. Drag/edit needs a 2nd interaction.
+    if (this.selectedEventId() !== evt.id) {
+      this.zone.run(() => this.selectedEventId.set(evt.id));
+      return;
+    }
+
+    this.moveDrag = {
+      evt,
+      startX: this.eventX(event),
+      startY: this.eventY(event),
+      isDragging: false,
+      hoverHour: null,
+      hoverDate: null,
+      ghost: null,
+    };
+
+    this.lockGrid();
+
+    // Registering outside the Angular zone keeps mousemove/touchmove from triggering
+    // change detection on every event — only signal updates inside zone.run() do.
+    this.zone.runOutsideAngular(() => {
+      this.doc.addEventListener('mousemove', this.boundMoveTrack as EventListener);
+      this.doc.addEventListener('mouseup', this.boundMoveEnd as EventListener);
+      this.doc.addEventListener('touchmove', this.boundMoveTrack as EventListener, { passive: false } as AddEventListenerOptions);
+      this.doc.addEventListener('touchend', this.boundMoveEnd as EventListener);
+      this.doc.addEventListener('touchcancel', this.boundMoveEnd as EventListener);
+    });
+  }
+
+  private onMoveTrack(event: MouseEvent | TouchEvent): void {
+    if (!this.moveDrag) return;
+    const x = this.eventX(event);
+    const y = this.eventY(event);
+    const dx = Math.abs(x - this.moveDrag.startX);
+    const dy = Math.abs(y - this.moveDrag.startY);
+
+    if (!this.moveDrag.isDragging) {
+      if (dx < 6 && dy < 6) return;
+      this.moveDrag.isDragging = true;
+      this.zone.run(() => this.movingEventId.set(this.moveDrag!.evt.id));
+      this.createMoveGhost(this.moveDrag.evt);
+    }
+
+    event.preventDefault?.();
+
+    this.currentDragXY = { x, y };
+    this.startAutoPan();
+
+    if (this.moveDrag.ghost) {
+      const w = this.moveDrag.ghost.offsetWidth;
+      this.moveDrag.ghost.style.left = `${x - w / 2}px`;
+      this.moveDrag.ghost.style.top = `${y - 16}px`;
+
+      this.moveDrag.ghost.style.visibility = 'hidden';
+      const el = this.doc.elementFromPoint(x, y);
+      this.moveDrag.ghost.style.visibility = 'visible';
+
+      const cell = el?.closest('[data-hour][data-date]');
+      const hour = cell ? parseInt(cell.getAttribute('data-hour')!, 10) : null;
+      const date = cell ? cell.getAttribute('data-date') : null;
+      if (hour !== this.moveDrag.hoverHour || date !== this.moveDrag.hoverDate) {
+        this.moveDrag.hoverHour = hour;
+        this.moveDrag.hoverDate = date;
+        this.zone.run(() => {
+          this.dragOverHour.set(hour);
+          this.dragOverDate.set(date);
+        });
+      }
+    }
+  }
+
+  private onMoveEnd(_event: MouseEvent | TouchEvent): void {
+    if (!this.moveDrag) return;
+    const drag = this.moveDrag;
+
+    this.doc.removeEventListener('mousemove', this.boundMoveTrack as EventListener);
+    this.doc.removeEventListener('mouseup', this.boundMoveEnd as EventListener);
+    this.doc.removeEventListener('touchmove', this.boundMoveTrack as EventListener);
+    this.doc.removeEventListener('touchend', this.boundMoveEnd as EventListener);
+    this.doc.removeEventListener('touchcancel', this.boundMoveEnd as EventListener);
+
+    this.stopAutoPan();
+    this.unlockGrid();
+
+    if (drag.ghost) {
+      drag.ghost.remove();
+      drag.ghost = null;
+    }
+
+    this.zone.run(() => {
+      if (drag.isDragging) {
+        if (drag.hoverHour !== null && drag.hoverDate) {
+          const duration = this.diffMinutes(drag.evt.startTime, drag.evt.endTime);
+          const newStart = `${drag.hoverHour.toString().padStart(2, '0')}:00`;
+          const newEnd = this.addMinutesToTime(newStart, duration);
+          this.scheduleService.updateEvent(drag.evt.id, {
+            date: drag.hoverDate,
+            startTime: newStart,
+            endTime: newEnd,
+          });
+        }
+      } else {
+        this.openEditModal(drag.evt);
+      }
+      this.movingEventId.set(null);
+      this.dragOverHour.set(null);
+      this.dragOverDate.set(null);
+    });
+
+    this.moveDrag = null;
+  }
+
+  // ── Selection: tap empty cell to deselect ───────────────────────────
+  onGridClick(e: Event): void {
+    const target = e.target as HTMLElement | null;
+    if (!target) return;
+    if (target.closest('[data-event-id]')) return;
+    if (this.selectedEventId() !== null) {
+      this.selectedEventId.set(null);
+    }
+  }
+
+  // ── Grid lock & edge auto-pan ───────────────────────────────────────
+  private lockGrid(): void {
+    const el = this.gridScrollEl;
+    if (!el) return;
+    el.style.touchAction = 'none';
+    el.style.overscrollBehavior = 'contain';
+    el.addEventListener('wheel', this.wheelBlocker, { passive: false } as AddEventListenerOptions);
+  }
+
+  private unlockGrid(): void {
+    const el = this.gridScrollEl;
+    if (!el) return;
+    el.style.touchAction = '';
+    el.style.overscrollBehavior = '';
+    el.removeEventListener('wheel', this.wheelBlocker);
+  }
+
+  private autoPanTick = (): void => {
+    if (!this.currentDragXY || !this.gridScrollEl) {
+      this.autoPanRaf = null;
+      return;
+    }
+    const el = this.gridScrollEl;
+    const rect = el.getBoundingClientRect();
+    const EDGE = 60;
+    const MAX_SPEED = 14;
+    const { x, y } = this.currentDragXY;
+
+    let dx = 0, dy = 0;
+    if (x < rect.left + EDGE) {
+      const t = Math.min(1, (rect.left + EDGE - x) / EDGE);
+      dx = -Math.round(MAX_SPEED * t);
+    } else if (x > rect.right - EDGE) {
+      const t = Math.min(1, (x - (rect.right - EDGE)) / EDGE);
+      dx = Math.round(MAX_SPEED * t);
+    }
+    if (y < rect.top + EDGE) {
+      const t = Math.min(1, (rect.top + EDGE - y) / EDGE);
+      dy = -Math.round(MAX_SPEED * t);
+    } else if (y > rect.bottom - EDGE) {
+      const t = Math.min(1, (y - (rect.bottom - EDGE)) / EDGE);
+      dy = Math.round(MAX_SPEED * t);
+    }
+
+    if (dx === 0 && dy === 0) {
+      this.autoPanRaf = null;
+      return;
+    }
+
+    const maxX = el.scrollWidth - rect.width;
+    const maxY = el.scrollHeight - rect.height;
+    const beforeX = el.scrollLeft;
+    const beforeY = el.scrollTop;
+    if (dx !== 0) el.scrollLeft = Math.max(0, Math.min(maxX, beforeX + dx));
+    if (dy !== 0) el.scrollTop = Math.max(0, Math.min(maxY, beforeY + dy));
+
+    if (el.scrollLeft === beforeX && el.scrollTop === beforeY) {
+      // Hit the scroll boundary — stop until next move event nudges us back.
+      this.autoPanRaf = null;
+      return;
+    }
+
+    this.autoPanRaf = requestAnimationFrame(this.autoPanTick);
+  };
+
+  private startAutoPan(): void {
+    if (this.autoPanRaf !== null) return;
+    this.autoPanRaf = requestAnimationFrame(this.autoPanTick);
+  }
+
+  private stopAutoPan(): void {
+    if (this.autoPanRaf !== null) {
+      cancelAnimationFrame(this.autoPanRaf);
+      this.autoPanRaf = null;
+    }
+    this.currentDragXY = null;
+  }
+
+  private cancelMoveDrag(): void {
+    if (!this.moveDrag) return;
+    if (this.moveDrag.ghost) this.moveDrag.ghost.remove();
+    this.doc.removeEventListener('mousemove', this.boundMoveTrack as EventListener);
+    this.doc.removeEventListener('mouseup', this.boundMoveEnd as EventListener);
+    this.doc.removeEventListener('touchmove', this.boundMoveTrack as EventListener);
+    this.doc.removeEventListener('touchend', this.boundMoveEnd as EventListener);
+    this.doc.removeEventListener('touchcancel', this.boundMoveEnd as EventListener);
+    this.stopAutoPan();
+    this.unlockGrid();
+    this.movingEventId.set(null);
+    this.dragOverHour.set(null);
+    this.dragOverDate.set(null);
+    this.moveDrag = null;
+  }
+
+  private createMoveGhost(evt: ScheduledEvent): void {
+    if (!this.moveDrag) return;
+    const source = this.doc.querySelector(`[data-event-id="${evt.id}"]`) as HTMLElement | null;
+    if (!source) return;
+    const rect = source.getBoundingClientRect();
+    const clone = source.cloneNode(true) as HTMLElement;
+    clone.style.cssText = `
+      position: fixed;
+      left: ${rect.left}px;
+      top: ${rect.top}px;
+      width: ${rect.width}px;
+      height: ${rect.height}px;
+      z-index: 10000;
+      opacity: 0.92;
+      pointer-events: none;
+      transform: scale(1.06);
+      transition: none;
+      border-radius: 6px;
+      box-shadow: 0 16px 32px rgba(94,67,251,0.3);
+    `;
+    this.doc.body.appendChild(clone);
+    this.moveDrag.ghost = clone;
+  }
+
+  // ── Resize ──────────────────────────────────────────────────────────
+  onResizeStart(event: MouseEvent | TouchEvent, evt: ScheduledEvent): void {
+    event.stopPropagation();
+    event.preventDefault();
+
+    // Resize handle also requires the event to be selected first.
+    if (this.selectedEventId() !== evt.id) {
+      this.zone.run(() => this.selectedEventId.set(evt.id));
+      return;
+    }
+
+    this.resizeEvent = evt;
+    this.resizeStartY = this.eventY(event);
+    this.resizeStartHeight = this.getCellEventHeight(evt.startTime, evt.endTime);
+    this.resizingEventId.set(evt.id);
+    this.resizingHeight.set(this.resizeStartHeight);
+    this.lockGrid();
+    this.zone.runOutsideAngular(() => {
+      this.doc.addEventListener('mousemove', this.boundResizeMove as EventListener);
+      this.doc.addEventListener('mouseup', this.boundResizeEnd as EventListener);
+      this.doc.addEventListener('touchmove', this.boundResizeMove as EventListener, { passive: false } as AddEventListenerOptions);
+      this.doc.addEventListener('touchend', this.boundResizeEnd as EventListener);
+      this.doc.addEventListener('touchcancel', this.boundResizeEnd as EventListener);
+    });
+  }
+
+  private onResizeMove(event: MouseEvent | TouchEvent): void {
+    if (!this.resizeEvent) return;
+    event.preventDefault?.();
+    const dy = this.eventY(event) - this.resizeStartY;
+    const next = Math.max(14, this.resizeStartHeight + dy);
+    this.zone.run(() => this.resizingHeight.set(next));
+  }
+
+  private onResizeEnd(_event: MouseEvent | TouchEvent): void {
+    this.doc.removeEventListener('mousemove', this.boundResizeMove as EventListener);
+    this.doc.removeEventListener('mouseup', this.boundResizeEnd as EventListener);
+    this.doc.removeEventListener('touchmove', this.boundResizeMove as EventListener);
+    this.doc.removeEventListener('touchend', this.boundResizeEnd as EventListener);
+    this.doc.removeEventListener('touchcancel', this.boundResizeEnd as EventListener);
+    this.unlockGrid();
+
+    this.zone.run(() => {
+      if (this.resizeEvent) {
+        const minutes = this.pixelsToMinutes(this.resizingHeight());
+        if (minutes > 0) this.scheduleService.resizeEvent(this.resizeEvent.id, minutes);
+      }
+      this.resizingEventId.set(null);
+      this.resizingHeight.set(0);
+      this.resizeEvent = null;
+    });
+  }
+
+  private pixelsToMinutes(px: number): number {
+    const minutes = Math.round((px / this.ROW_H) * 60 / 15) * 15;
+    return Math.max(15, minutes);
+  }
+
+  private diffMinutes(start: string, end: string): number {
+    const [sh, sm] = start.split(':').map(Number);
+    const [eh, em] = end.split(':').map(Number);
+    return eh * 60 + em - (sh * 60 + sm);
+  }
+
+  private addMinutesToTime(time: string, minutes: number): string {
+    const [h, m] = time.split(':').map(Number);
+    const total = h * 60 + m + minutes;
+    const nh = Math.min(23, Math.floor(total / 60));
+    const nm = total % 60;
+    return `${nh.toString().padStart(2, '0')}:${nm.toString().padStart(2, '0')}`;
+  }
+
+  openEditModal(evt: ScheduledEvent): void {
+    this.editingEvent.set(evt);
+    this.editDate = evt.date;
+    this.editStart = evt.startTime;
+    this.editEnd = evt.endTime;
+  }
+
+  closeEditModal(): void {
+    this.editingEvent.set(null);
+  }
+
+  saveEditModal(): void {
+    const evt = this.editingEvent();
+    if (!evt) return;
+    const [sh, sm] = this.editStart.split(':').map(Number);
+    const [eh, em] = this.editEnd.split(':').map(Number);
+    if ((eh * 60 + em) - (sh * 60 + sm) <= 0) return;
+    if (!this.editDate) return;
+    this.scheduleService.updateEvent(evt.id, {
+      date: this.editDate,
+      startTime: this.editStart,
+      endTime: this.editEnd,
+    });
+    this.editingEvent.set(null);
+  }
+
+  private eventX(e: MouseEvent | TouchEvent): number {
+    return 'touches' in e ? e.touches[0]?.clientX ?? 0 : e.clientX;
+  }
+
+  private eventY(e: MouseEvent | TouchEvent): number {
+    return 'touches' in e ? e.touches[0]?.clientY ?? e.changedTouches[0]?.clientY ?? 0 : e.clientY;
   }
 
   private getMonday(date: Date): Date {

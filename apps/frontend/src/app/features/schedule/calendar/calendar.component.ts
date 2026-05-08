@@ -6,7 +6,7 @@ import { ScheduledEvent } from '../../../core/models/schedule.model';
 
 
 const DAY_ABBR = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
-const HOURS = ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00'];
+const HOURS = Array.from({ length: 24 }, (_, i) => `${i.toString().padStart(2, '0')}:00`);
 
 @Component({
   selector: 'app-calendar',
@@ -26,6 +26,22 @@ const HOURS = ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '1
                 class="text-primary text-xs font-bold uppercase tracking-wider hover:bg-primary/5 px-3 py-1.5 rounded-lg transition-colors">
           Schedule Now
         </button>
+      </div>
+    </div>
+
+    <!-- Conflict warning -->
+    <div *ngIf="conflictCount() > 0" class="px-margin-page mt-3">
+      <div class="rounded-2xl p-3 flex items-center gap-2.5 border"
+           style="background:rgba(186,26,26,0.08); border-color:rgba(186,26,26,0.25);">
+        <span class="material-symbols-outlined text-[20px] flex-shrink-0" style="color:#ba1a1a;">warning</span>
+        <div class="min-w-0 flex-1">
+          <p class="text-[13px] font-bold" style="color:#ba1a1a;">
+            {{ conflictCount() }} time {{ conflictCount() === 1 ? 'conflict' : 'conflicts' }} on this day
+          </p>
+          <p class="text-[11px] text-on-surface-variant leading-tight">
+            Overlapping tasks share their slot side-by-side
+          </p>
+        </div>
       </div>
     </div>
 
@@ -67,9 +83,8 @@ const HOURS = ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '1
 
           <!-- Event Blocks -->
           <div *ngFor="let evt of todayEvents"
-               class="absolute left-2 right-4 rounded-xl p-3 flex justify-between items-start shadow-sm border-l-4"
-               [style.top.px]="getEventTop(evt.startTime)"
-               [style.height.px]="getEventHeight(evt.startTime, evt.endTime)"
+               class="absolute rounded-xl p-3 flex justify-between items-start shadow-sm border-l-4"
+               [ngStyle]="getEventBoxStyle(evt)"
                [style.background]="getEventBg(evt.type)"
                [style.borderLeftColor]="getEventAccent(evt.type, evt.color)">
             <div class="overflow-hidden">
@@ -112,7 +127,17 @@ export class CalendarComponent implements OnInit {
   selectedDate = new Date();
   hours        = HOURS;
 
-  unscheduledCount = computed(() => this.scheduleService.unscheduledTasks().length);
+  unscheduledCount = computed(() =>
+    this.scheduleService.unscheduledTasks().filter(t => t.remainingMinutes > 0).length,
+  );
+
+  conflictCount = computed(() => {
+    const events = this.scheduleService.events()
+      .filter(e => e.date === this.selectedDate.toISOString().split('T')[0]);
+    let n = 0;
+    this.computeLayout(events).forEach(l => { if (l.count > 1) n++; });
+    return n;
+  });
 
   get weekDays() {
     const today = new Date();
@@ -152,12 +177,80 @@ export class CalendarComponent implements OnInit {
 
   getEventTop(startTime: string): number {
     const [h, m] = startTime.split(':').map(Number);
-    return (h - 8) * 80 + (m / 60) * 80 + 8;
+    return h * 80 + (m / 60) * 80 + 8;
   }
 
   getEventHeight(startTime: string, endTime: string): number {
     const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
     return Math.max(48, ((toMin(endTime) - toMin(startTime)) / 60) * 80 - 8);
+  }
+
+  // ── Overlap layout ──────────────────────────────────────────────────
+  private toMin(t: string): number {
+    const [h, m] = t.split(':').map(Number);
+    return h * 60 + m;
+  }
+
+  private computeLayout(events: ScheduledEvent[]): Map<string, { col: number; count: number }> {
+    const result = new Map<string, { col: number; count: number }>();
+    if (events.length === 0) return result;
+    const sorted = [...events].sort((a, b) => this.toMin(a.startTime) - this.toMin(b.startTime));
+    let cluster: ScheduledEvent[] = [];
+    let clusterEnd = -1;
+    const flush = () => {
+      if (!cluster.length) return;
+      const cols: number[] = [];
+      const assigns: number[] = [];
+      for (const evt of cluster) {
+        const start = this.toMin(evt.startTime);
+        let assigned = -1;
+        for (let i = 0; i < cols.length; i++) {
+          if (cols[i] <= start) { assigned = i; break; }
+        }
+        if (assigned === -1) { assigned = cols.length; cols.push(0); }
+        cols[assigned] = this.toMin(evt.endTime);
+        assigns.push(assigned);
+      }
+      const count = cols.length;
+      cluster.forEach((evt, i) => result.set(evt.id, { col: assigns[i], count }));
+    };
+    for (const evt of sorted) {
+      const s = this.toMin(evt.startTime);
+      const e = this.toMin(evt.endTime);
+      if (s < clusterEnd) {
+        cluster.push(evt);
+        clusterEnd = Math.max(clusterEnd, e);
+      } else {
+        flush();
+        cluster = [evt];
+        clusterEnd = e;
+      }
+    }
+    flush();
+    return result;
+  }
+
+  get dayLayout(): Map<string, { col: number; count: number }> {
+    return this.computeLayout(this.todayEvents);
+  }
+
+  getEventBoxStyle(evt: ScheduledEvent): Record<string, string> {
+    const layout = this.dayLayout.get(evt.id);
+    const style: Record<string, string> = {
+      top: `${this.getEventTop(evt.startTime)}px`,
+      height: `${this.getEventHeight(evt.startTime, evt.endTime)}px`,
+    };
+    if (!layout || layout.count <= 1) {
+      style['left'] = '8px';
+      style['right'] = '16px';
+      style['width'] = 'auto';
+      return style;
+    }
+    const widthPct = 100 / layout.count;
+    style['left'] = `calc(8px + ${layout.col * widthPct}%)`;
+    style['width'] = `calc(${widthPct}% - 12px)`;
+    style['right'] = 'auto';
+    return style;
   }
 
   getEventBg(type: string): string {

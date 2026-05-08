@@ -6,6 +6,7 @@ export interface ScheduledEvent {
   startTime: string;
   endTime: string;
   color: string;
+  sourceTaskId?: string;
 }
 
 export interface Meeting {
@@ -24,4 +25,6 @@ export interface UnscheduledTask {
   title: string;
   projectId: string;
   dueDate: string;
+  durationMinutes: number;
+  remainingMinutes: number;
 }

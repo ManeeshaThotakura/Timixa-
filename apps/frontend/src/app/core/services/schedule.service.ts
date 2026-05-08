@@ -42,8 +42,92 @@ export class ScheduleService {
     });
   }
 
-  scheduleTask(taskId: string): void {
-    this._unscheduledTasks.update(tasks => tasks.filter(t => t.id !== taskId));
+  scheduleTask(taskId: string, minutes: number): void {
+    this._unscheduledTasks.update(tasks =>
+      tasks.map(t =>
+        t.id === taskId
+          ? { ...t, remainingMinutes: Math.max(0, t.remainingMinutes - minutes) }
+          : t,
+      ),
+    );
+  }
+
+  returnTimeToTask(taskId: string, minutes: number): void {
+    if (minutes <= 0) return;
+    this._unscheduledTasks.update(tasks => {
+      const idx = tasks.findIndex(t => t.id === taskId);
+      if (idx >= 0) {
+        const t = tasks[idx];
+        const next = [...tasks];
+        next[idx] = {
+          ...t,
+          remainingMinutes: Math.min(t.durationMinutes, t.remainingMinutes + minutes),
+        };
+        return next;
+      }
+      return tasks;
+    });
+  }
+
+  resizeEvent(eventId: string, newDurationMinutes: number): void {
+    const event = this._events().find(e => e.id === eventId);
+    if (!event) return;
+    const oldDuration = this.minutesBetween(event.startTime, event.endTime);
+    const delta = oldDuration - newDurationMinutes;
+    const newEnd = this.addMinutes(event.startTime, newDurationMinutes);
+    this._events.update(events =>
+      events.map(e => (e.id === eventId ? { ...e, endTime: newEnd } : e)),
+    );
+    if (event.sourceTaskId && delta !== 0) {
+      if (delta > 0) this.returnTimeToTask(event.sourceTaskId, delta);
+      else this.scheduleTask(event.sourceTaskId, -delta);
+    }
+  }
+
+  updateEvent(
+    eventId: string,
+    patch: { date?: string; startTime?: string; endTime?: string },
+  ): void {
+    const event = this._events().find(e => e.id === eventId);
+    if (!event) return;
+    const newStart = patch.startTime ?? event.startTime;
+    const newEnd = patch.endTime ?? event.endTime;
+    const newDate = patch.date ?? event.date;
+    const oldDuration = this.minutesBetween(event.startTime, event.endTime);
+    const newDuration = this.minutesBetween(newStart, newEnd);
+    const delta = oldDuration - newDuration;
+    this._events.update(events =>
+      events.map(e =>
+        e.id === eventId ? { ...e, date: newDate, startTime: newStart, endTime: newEnd } : e,
+      ),
+    );
+    if (event.sourceTaskId && delta !== 0) {
+      if (delta > 0) this.returnTimeToTask(event.sourceTaskId, delta);
+      else this.scheduleTask(event.sourceTaskId, -delta);
+    }
+  }
+
+  updateEventTime(eventId: string, startTime: string, endTime: string): void {
+    const event = this._events().find(e => e.id === eventId);
+    if (!event) return;
+    const oldDuration = this.minutesBetween(event.startTime, event.endTime);
+    const newDuration = this.minutesBetween(startTime, endTime);
+    const delta = oldDuration - newDuration;
+    this._events.update(events =>
+      events.map(e => (e.id === eventId ? { ...e, startTime, endTime } : e)),
+    );
+    if (event.sourceTaskId && delta !== 0) {
+      if (delta > 0) this.returnTimeToTask(event.sourceTaskId, delta);
+      else this.scheduleTask(event.sourceTaskId, -delta);
+    }
+  }
+
+  removeEvent(eventId: string): void {
+    const event = this._events().find(e => e.id === eventId);
+    if (!event) return;
+    const duration = this.minutesBetween(event.startTime, event.endTime);
+    this._events.update(events => events.filter(e => e.id !== eventId));
+    if (event.sourceTaskId) this.returnTimeToTask(event.sourceTaskId, duration);
   }
 
   dismissUnscheduledBanner(): void {
@@ -70,5 +154,19 @@ export class ScheduleService {
 
   getMeetingsByProject(projectId: string): Meeting[] {
     return this._meetings().filter(m => m.projectId === projectId);
+  }
+
+  private minutesBetween(start: string, end: string): number {
+    const [sh, sm] = start.split(':').map(Number);
+    const [eh, em] = end.split(':').map(Number);
+    return eh * 60 + em - (sh * 60 + sm);
+  }
+
+  private addMinutes(time: string, minutes: number): string {
+    const [h, m] = time.split(':').map(Number);
+    const total = h * 60 + m + minutes;
+    const nh = Math.floor(total / 60) % 24;
+    const nm = total % 60;
+    return `${nh.toString().padStart(2, '0')}:${nm.toString().padStart(2, '0')}`;
   }
 }
