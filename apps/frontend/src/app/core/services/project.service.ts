@@ -1,13 +1,16 @@
 import { Injectable, signal, computed, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Project, Task, ProjectStats } from '../models/project.model';
+import { environment } from '../../../environments/environment';
 
 @Injectable({ providedIn: 'root' })
 export class ProjectService {
   private http = inject(HttpClient);
+  private apiUrl = environment.apiUrl;
 
   private _projects = signal<Project[]>([]);
   private _tasks = signal<Task[]>([]);
+  private _loaded = signal(false);
 
   readonly projects = this._projects.asReadonly();
   readonly tasks = this._tasks.asReadonly();
@@ -27,9 +30,16 @@ export class ProjectService {
   });
 
   load(): void {
-    if (this._projects().length) return;
-    this.http.get<Project[]>('assets/mock/projects.json').subscribe(p => this._projects.set(p));
-    this.http.get<Task[]>('assets/mock/tasks.json').subscribe(t => this._tasks.set(t));
+    if (this._loaded()) return;
+    this._loaded.set(true);
+    this.http.get<Project[]>(`${this.apiUrl}/projects`).subscribe({
+      next: p => this._projects.set(p),
+      error: () => this._loaded.set(false),
+    });
+    this.http.get<Task[]>(`${this.apiUrl}/tasks`).subscribe({
+      next: t => this._tasks.set(t),
+      error: () => {},
+    });
   }
 
   getProjectById(id: string): Project | undefined {
@@ -46,12 +56,24 @@ export class ProjectService {
   }
 
   updateTaskStatus(taskId: string, status: Task['status']): void {
-    this._tasks.update(tasks =>
-      tasks.map(t => (t.id === taskId ? { ...t, status } : t))
-    );
+    // Optimistic update for snappy kanban drag
+    this._tasks.update(tasks => tasks.map(t => (t.id === taskId ? { ...t, status } : t)));
+    this.http
+      .patch<Task>(`${this.apiUrl}/tasks/${taskId}/status`, { status })
+      .subscribe({
+        next: updated => this._tasks.update(ts => ts.map(t => (t.id === taskId ? updated : t))),
+        error: () => this.refreshTasks(),
+      });
   }
 
   addTask(task: Task): void {
-    this._tasks.update(tasks => [...tasks, task]);
+    const { id, ...payload } = task;
+    this.http.post<Task>(`${this.apiUrl}/tasks`, payload).subscribe(t => {
+      this._tasks.update(ts => [...ts, t]);
+    });
+  }
+
+  private refreshTasks(): void {
+    this.http.get<Task[]>(`${this.apiUrl}/tasks`).subscribe(t => this._tasks.set(t));
   }
 }

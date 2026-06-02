@@ -2,6 +2,7 @@ import { Component, signal, computed, inject } from '@angular/core';
 import { CommonModule, Location } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HabitService } from '../../core/services/habit.service';
+import { ScheduleService } from '../../core/services/schedule.service';
 import { SchedulePickerComponent } from '../../shared/components/schedule-picker/schedule-picker.component';
 import { ScheduleConfig, defaultScheduleConfig } from '../../core/models/schedule-config.model';
 
@@ -9,6 +10,7 @@ const GOAL_ICONS: Record<string, string> = {
   Fitness: '🏃‍♂️', Learning: '📚', Health: '🧘‍♀️',
   Work: '💼', Mindfulness: '🧠', Social: '🤝',
 };
+
 
 @Component({
   selector: 'app-new-task',
@@ -354,8 +356,9 @@ const GOAL_ICONS: Record<string, string> = {
   `,
 })
 export class NewTaskComponent {
-  private habitService = inject(HabitService);
-  private location     = inject(Location);
+  private habitService    = inject(HabitService);
+  private scheduleService = inject(ScheduleService);
+  private location        = inject(Location);
 
   goals             = signal<string[]>(['Fitness', 'Learning', 'Health']);
   selectedGoal      = signal<string>('Fitness');
@@ -459,14 +462,51 @@ export class NewTaskComponent {
   createTask(): void {
     const title = this.taskName().trim();
     if (!title) return;
-    const target = this.taskType() === 'time'
+
+    const isTimeTask = this.taskType() === 'time';
+    const target = isTimeTask
       ? this.targetMinutes()
       : this.taskType() === 'count'
         ? this.targetCount()
         : 1;
-    const unit = this.taskType() === 'time' ? 'min' : 'times';
+    const unit = isTimeTask ? 'min' : 'times';
+
+    // 1. Always create a habit so progress is trackable on the dashboard
     this.habitService.addTask(title, this.selectedGoal(), target, unit);
+
+    const cfg = this.scheduleConfig();
+    const today = new Date().toISOString().split('T')[0];
+
+    // 2. Routing decision: scheduled → calendar, time-based unscheduled → unscheduled banner
+    if (this.isScheduled() && cfg?.startTime) {
+      const minutes = isTimeTask ? this.targetMinutes() : 30;
+      const endTime = cfg.endTime || this.addMinutesToTime(cfg.startTime, minutes);
+      this.scheduleService.addEvent({
+        id: '',
+        title,
+        type: 'task',
+        date: cfg.startDate || today,
+        startTime: cfg.startTime,
+        endTime,
+        color: '#451de3',
+      });
+    } else if (isTimeTask) {
+      this.scheduleService.addUnscheduledTask({
+        title,
+        durationMinutes: this.targetMinutes(),
+        dueDate: cfg?.endsOnDate || today,
+      });
+    }
+
     this.goBack();
+  }
+
+  private addMinutesToTime(time: string, minutes: number): string {
+    const [h, m] = time.split(':').map(Number);
+    const total = h * 60 + m + minutes;
+    const nh = Math.floor(total / 60) % 24;
+    const nm = total % 60;
+    return `${nh.toString().padStart(2, '0')}:${nm.toString().padStart(2, '0')}`;
   }
 
   goBack(): void { this.location.back(); }
