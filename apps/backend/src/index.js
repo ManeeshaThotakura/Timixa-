@@ -49,3 +49,5 @@ scheduler.start();
 app.listen(config.PORT, () => {
   console.log(`Timixa API running on http://localhost:${config.PORT}`);
 });
+
+
