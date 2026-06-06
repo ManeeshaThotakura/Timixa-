@@ -45,8 +45,8 @@ interface FrequencyTab {
         </p>
       </div>
 
-      <!-- Start row: date + time -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
+      <!-- Start row: date + time (hidden for all-day notify-only tasks) -->
+      <div *ngIf="needsTimeSlot" class="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
         <div class="min-w-0">
           <label class="block text-[10px] sm:text-[11px] font-bold text-outline uppercase ml-1 mb-1">
             Start Date <span class="font-normal text-outline-variant lowercase">(optional)</span>
@@ -69,8 +69,8 @@ interface FrequencyTab {
         </div>
       </div>
 
-      <!-- End row: date + time -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
+      <!-- End row: date + time (hidden for all-day notify-only tasks) -->
+      <div *ngIf="needsTimeSlot" class="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
         <div class="min-w-0">
           <label class="block text-[10px] sm:text-[11px] font-bold text-outline uppercase ml-1 mb-1">
             End Date <span class="font-normal text-outline-variant lowercase">(optional)</span>
@@ -274,6 +274,7 @@ interface FrequencyTab {
 export class SchedulePickerComponent implements OnInit {
   @Input() value: ScheduleConfig | null = null;
   @Input() lockedFrequency: Frequency | null = null;
+  @Input() needsTimeSlot = true;
   @Output() valueChange = new EventEmitter<ScheduleConfig>();
 
   config: ScheduleConfig = { ...defaultScheduleConfig };

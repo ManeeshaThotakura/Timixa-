@@ -1,8 +1,13 @@
 import { Component, signal, computed, inject } from '@angular/core';
 import { CommonModule, Location } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { HabitService } from '../../core/services/habit.service';
-import { ScheduleService } from '../../core/services/schedule.service';
+import { Router } from '@angular/router';
+import { PlannedTaskService } from '../../core/services/planned-task.service';
+import {
+  PlannedTaskCadence,
+  PlannedTaskInput,
+  Weekday,
+} from '../../core/models/planned-task.model';
 import { SchedulePickerComponent } from '../../shared/components/schedule-picker/schedule-picker.component';
 import { ScheduleConfig, defaultScheduleConfig } from '../../core/models/schedule-config.model';
 
@@ -27,10 +32,11 @@ const GOAL_ICONS: Record<string, string> = {
         <h1 class="text-lg font-extrabold text-on-surface" style="font-family:Manrope;">New Task</h1>
       </div>
       <button (click)="createTask()"
-              [disabled]="!taskName().trim()"
+              [disabled]="!taskName().trim() || saving()"
               class="font-semibold text-sm transition-colors"
               [style.color]="taskName().trim() ? '#451de3' : '#9aa0a6'"
-              style="font-family:Manrope;">
+              style="font-family:Manrope;"
+              data-testid="new-task-save">
         Save
       </button>
     </header>
@@ -179,47 +185,51 @@ const GOAL_ICONS: Record<string, string> = {
 
       </section>
 
-      <!-- Section 5: Schedule (collapsible accordion) -->
+      <!-- Section 4b: Needs time slot toggle -->
+      <section>
+        <div class="bg-surface-container-lowest rounded-[20px] border border-outline-variant/20 shadow-sm p-4">
+          <label class="flex items-start justify-between gap-3 cursor-pointer">
+            <div class="min-w-0 flex-1">
+              <p class="font-semibold text-[16px] text-on-surface">Needs a time slot</p>
+              <p class="text-[13px] text-on-surface-variant mt-1 leading-snug">
+                {{ needsTimeSlot()
+                  ? 'You will pick a time on the schedule page after saving.'
+                  : 'All-day task — done any time on its scheduled days.' }}
+              </p>
+            </div>
+            <div class="relative inline-flex items-center flex-shrink-0 mt-1">
+              <input type="checkbox" class="sr-only peer"
+                     [checked]="needsTimeSlot()"
+                     (change)="needsTimeSlot.set($any($event.target).checked)"
+                     data-testid="new-task-needs-time-slot" />
+              <div class="w-11 h-6 bg-surface-container rounded-full peer
+                          peer-checked:bg-primary-container
+                          after:content-[''] after:absolute after:top-[2px] after:start-[2px]
+                          after:bg-white after:border after:border-gray-300 after:rounded-full
+                          after:h-5 after:w-5 after:transition-all
+                          peer-checked:after:translate-x-full"></div>
+            </div>
+          </label>
+        </div>
+      </section>
+
+      <!-- Section 5: Schedule (always visible — needsTimeSlot toggles only the date/time inputs inside) -->
       <section>
         <div class="bg-surface-container-lowest rounded-[20px] border border-outline-variant/20 shadow-sm overflow-hidden">
-
-          <!-- Accordion trigger -->
-          <button type="button" (click)="toggleSchedule()"
-                  class="w-full flex justify-between items-center p-4 active:bg-surface-container-high transition-colors">
-            <div class="flex items-center gap-3 text-left min-w-0 flex-1">
-              <span class="material-symbols-outlined flex-shrink-0"
-                    [class.text-primary]="isScheduled()"
-                    [class.text-on-surface-variant]="!isScheduled()">
-                calendar_month
-              </span>
-              <div class="min-w-0">
-                <p class="font-semibold"
-                   [class.text-primary]="isScheduled()"
-                   [class.text-on-surface-variant]="!isScheduled()">
-                  {{ isScheduled() ? 'Schedule set' : 'Schedule this task' }}
-                </p>
-                <p *ngIf="isScheduled() && scheduleConfig() as cfg"
-                   class="text-[12px] text-on-surface-variant truncate">
-                  {{ scheduleSummary() }}
-                </p>
-              </div>
+          <div class="flex items-center gap-3 p-4 border-b border-outline-variant/10">
+            <span class="material-symbols-outlined text-primary">calendar_month</span>
+            <div class="min-w-0">
+              <p class="font-semibold text-primary">Schedule</p>
+              <p *ngIf="scheduleConfig() as cfg" class="text-[12px] text-on-surface-variant truncate">
+                {{ scheduleSummary() }}
+              </p>
             </div>
-            <span class="material-symbols-outlined text-outline transition-transform duration-200 flex-shrink-0"
-                  [style.transform]="isScheduled() ? 'rotate(180deg)' : 'rotate(0deg)'">
-              expand_more
-            </span>
-          </button>
-
-          <!-- Accordion content (initially hidden) -->
-          <div *ngIf="isScheduled()" class="px-4 pb-4 pt-1 border-t border-outline-variant/10">
+          </div>
+          <div class="px-4 pb-4 pt-3">
             <app-schedule-picker
               [value]="scheduleConfig()"
+              [needsTimeSlot]="needsTimeSlot()"
               (valueChange)="scheduleConfig.set($event)" />
-
-            <button type="button" (click)="clearSchedule()"
-                    class="w-full mt-4 py-2 text-[13px] font-semibold text-error hover:bg-error-container/30 rounded-xl transition-colors">
-              Remove schedule
-            </button>
           </div>
         </div>
       </section>
@@ -311,11 +321,15 @@ const GOAL_ICONS: Record<string, string> = {
     <!-- Sticky Bottom -->
     <div class="fixed bottom-0 left-0 w-full px-margin-page py-4 z-40"
          style="background:rgba(255,255,255,0.7); backdrop-filter:blur(20px);">
+      <p *ngIf="error()" class="text-red-500 text-sm mb-3 text-center" data-testid="new-task-error">
+        {{ error() }}
+      </p>
       <button (click)="createTask()"
-              [disabled]="!taskName().trim()"
+              [disabled]="!taskName().trim() || saving()"
               class="w-full py-4 text-white rounded-[20px] font-bold text-[18px] transition-all active:scale-95 disabled:opacity-40"
-              style="font-family:Manrope; background:#5e43fb; box-shadow:0 16px 32px rgba(94,67,251,0.25);">
-        Create Task
+              style="font-family:Manrope; background:#5e43fb; box-shadow:0 16px 32px rgba(94,67,251,0.25);"
+              data-testid="new-task-submit">
+        {{ saving() ? 'Saving...' : 'Create Task' }}
       </button>
     </div>
 
@@ -356,9 +370,12 @@ const GOAL_ICONS: Record<string, string> = {
   `,
 })
 export class NewTaskComponent {
-  private habitService    = inject(HabitService);
-  private scheduleService = inject(ScheduleService);
-  private location        = inject(Location);
+  private plannedTasks = inject(PlannedTaskService);
+  private location     = inject(Location);
+  private router       = inject(Router);
+
+  saving = signal(false);
+  error  = signal<string | null>(null);
 
   goals             = signal<string[]>(['Fitness', 'Learning', 'Health']);
   selectedGoal      = signal<string>('Fitness');
@@ -370,8 +387,8 @@ export class NewTaskComponent {
   notifyAtStart     = signal<boolean>(true);
   notifyAtEnd       = signal<boolean>(false);
   nightReminder     = signal<boolean>(true);
-  isScheduled       = signal<boolean>(false);
-  scheduleConfig    = signal<ScheduleConfig | null>(null);
+  needsTimeSlot     = signal<boolean>(true);
+  scheduleConfig    = signal<ScheduleConfig>({ ...defaultScheduleConfig });
   showGoalModal     = signal<boolean>(false);
   newGoalName       = signal<string>('');
 
@@ -420,19 +437,6 @@ export class NewTaskComponent {
   incrementTime(): void { this.targetMinutes.update(n => n + 15); }
   decrementTime(): void { this.targetMinutes.update(n => Math.max(15, n - 15)); }
 
-  toggleSchedule(): void {
-    const next = !this.isScheduled();
-    this.isScheduled.set(next);
-    if (next && !this.scheduleConfig()) {
-      this.scheduleConfig.set({ ...defaultScheduleConfig });
-    }
-  }
-
-  clearSchedule(): void {
-    this.isScheduled.set(false);
-    this.scheduleConfig.set(null);
-  }
-
   scheduleSummary(): string {
     const c = this.scheduleConfig();
     if (!c) return '';
@@ -462,43 +466,87 @@ export class NewTaskComponent {
   createTask(): void {
     const title = this.taskName().trim();
     if (!title) return;
+    const input = this.toPlannedTaskInput(title);
+    this.saving.set(true);
+    this.error.set(null);
+    this.plannedTasks.create(input).subscribe({
+      next: () => {
+        this.saving.set(false);
+        this.router.navigateByUrl(this.routeForCadence(input.cadence));
+      },
+      error: (err) => {
+        this.saving.set(false);
+        this.error.set(err?.error?.message || 'Could not save task. Please try again.');
+      },
+    });
+  }
 
-    const isTimeTask = this.taskType() === 'time';
-    const target = isTimeTask
-      ? this.targetMinutes()
-      : this.taskType() === 'count'
-        ? this.targetCount()
-        : 1;
-    const unit = isTimeTask ? 'min' : 'times';
+  private routeForCadence(cadence: PlannedTaskCadence): string {
+    switch (cadence) {
+      case 'WEEKLY':  return '/schedule/week';
+      case 'MONTHLY': return '/schedule/month';
+      default:        return '/schedule';
+    }
+  }
 
-    // 1. Always create a habit so progress is trackable on the dashboard
-    this.habitService.addTask(title, this.selectedGoal(), target, unit);
-
+  private toPlannedTaskInput(title: string): PlannedTaskInput {
     const cfg = this.scheduleConfig();
-    const today = new Date().toISOString().split('T')[0];
+    const isTimeTask = this.taskType() === 'time';
+    const minutes = isTimeTask ? this.targetMinutes() : 30;
+    const needsTimeSlot = this.needsTimeSlot();
 
-    // 2. Routing decision: scheduled → calendar, time-based unscheduled → unscheduled banner
-    if (this.isScheduled() && cfg?.startTime) {
-      const minutes = isTimeTask ? this.targetMinutes() : 30;
-      const endTime = cfg.endTime || this.addMinutesToTime(cfg.startTime, minutes);
-      this.scheduleService.addEvent({
-        id: '',
-        title,
-        type: 'task',
-        date: cfg.startDate || today,
-        startTime: cfg.startTime,
-        endTime,
-        color: '#451de3',
-      });
-    } else if (isTimeTask) {
-      this.scheduleService.addUnscheduledTask({
-        title,
-        durationMinutes: this.targetMinutes(),
-        dueDate: cfg?.endsOnDate || today,
-      });
+    let cadence: PlannedTaskCadence;
+    let weekdays: Weekday[] | undefined;
+    let monthDays: number[] | undefined;
+
+    switch (cfg.frequency) {
+      case 'weekly':
+        cadence = 'WEEKLY';
+        weekdays = this.mapWeeklyDays(cfg.weeklyDays);
+        break;
+      case 'monthly':
+        cadence = 'MONTHLY';
+        monthDays = cfg.monthlyDay != null ? [cfg.monthlyDay] : [new Date().getDate()];
+        break;
+      case 'yearly':
+      case 'daily':
+      default:
+        cadence = 'DAILY';
+        break;
     }
 
-    this.goBack();
+    let startTime: string | undefined;
+    let endTime: string | undefined;
+    if (needsTimeSlot && cfg.startTime) {
+      startTime = cfg.startTime;
+      endTime = cfg.endTime || this.addMinutesToTime(cfg.startTime, minutes);
+    }
+
+    return {
+      title,
+      goal: this.selectedGoal(),
+      color: '#451de3',
+      cadence,
+      needsTimeSlot,
+      startTime,
+      endTime,
+      weekdays,
+      monthDays,
+    };
+  }
+
+  private mapWeeklyDays(days: string[] | undefined): Weekday[] | undefined {
+    if (!days || !days.length) return undefined;
+    const map: Record<string, Weekday> = {
+      mon: 'MONDAY', tue: 'TUESDAY', wed: 'WEDNESDAY', thu: 'THURSDAY',
+      fri: 'FRIDAY', sat: 'SATURDAY', sun: 'SUNDAY',
+    };
+    const out: Weekday[] = [];
+    for (const d of days) {
+      const w = map[d.toLowerCase()];
+      if (w) out.push(w);
+    }
+    return out.length ? out : undefined;
   }
 
   private addMinutesToTime(time: string, minutes: number): string {
