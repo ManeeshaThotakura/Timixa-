@@ -4,6 +4,13 @@ export type Weekday =
   | 'MONDAY' | 'TUESDAY' | 'WEDNESDAY' | 'THURSDAY'
   | 'FRIDAY' | 'SATURDAY' | 'SUNDAY';
 
+export type ExceptionType = 'SKIP' | 'ADD';
+
+export interface PlannedTaskException {
+  date: string;            // YYYY-MM-DD
+  type: ExceptionType;
+}
+
 export interface PlannedTask {
   id: string;
   userId: string;
@@ -17,6 +24,11 @@ export interface PlannedTask {
   scheduledDate?: string;
   weekdays?: Weekday[];
   monthDays?: number[];
+  minTimeMinutes?: number;
+  maxTimeMinutes?: number;
+  minCount?: number;
+  maxCount?: number;
+  exceptions: PlannedTaskException[];
   completedToday: boolean;
   createdAt: string;
   updatedAt: string;
@@ -33,6 +45,10 @@ export interface PlannedTaskInput {
   scheduledDate?: string;
   weekdays?: Weekday[];
   monthDays?: number[];
+  minTimeMinutes?: number | null;
+  maxTimeMinutes?: number | null;
+  minCount?: number | null;
+  maxCount?: number | null;
 }
 
 export type PlannedTaskUpdate = Partial<PlannedTaskInput>;

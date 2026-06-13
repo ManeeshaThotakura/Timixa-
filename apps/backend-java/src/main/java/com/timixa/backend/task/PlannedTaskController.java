@@ -34,6 +34,13 @@ public class PlannedTaskController {
             : service.findForDate(principal.id(), date);
     }
 
+    @GetMapping("/{id}")
+    public PlannedTaskResponse findOne(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable UUID id) {
+        return service.findOne(principal.id(), id);
+    }
+
     @PostMapping
     public ResponseEntity<PlannedTaskResponse> create(
             @AuthenticationPrincipal UserPrincipal principal,

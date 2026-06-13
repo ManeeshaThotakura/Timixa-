@@ -1,15 +1,24 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, tap } from 'rxjs';
+import { Observable, forkJoin, of, switchMap, tap } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import {
+  ExceptionType,
   PlannedTask,
   PlannedTaskInput,
   PlannedTaskUpdate,
+  Weekday,
 } from '../models/planned-task.model';
 
 function todayIso(): string {
   const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function isoFromDate(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
@@ -73,9 +82,25 @@ export class PlannedTaskService {
   );
 
   loadToday(): Observable<PlannedTask[]> {
-    return this.http
-      .get<PlannedTask[]>(`${this.base}?date=${todayIso()}`)
-      .pipe(tap(list => this._tasks.set(list)));
+    return this.loadForDate(todayIso()).pipe(tap(list => this._tasks.set(list)));
+  }
+
+  loadForDate(date: string): Observable<PlannedTask[]> {
+    return this.http.get<PlannedTask[]>(`${this.base}?date=${date}`);
+  }
+
+  loadForWeek(weekStart: string): Observable<Map<string, PlannedTask[]>> {
+    const start = new Date(weekStart);
+    const calls: { [date: string]: Observable<PlannedTask[]> } = {};
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(start);
+      d.setDate(start.getDate() + i);
+      const iso = isoFromDate(d);
+      calls[iso] = this.loadForDate(iso);
+    }
+    return forkJoin(calls).pipe(
+      switchMap(map => of(new Map(Object.entries(map)))),
+    );
   }
 
   create(input: PlannedTaskInput): Observable<PlannedTask> {
@@ -118,6 +143,31 @@ export class PlannedTaskService {
       .pipe(tap(() => this._tasks.update(list => list.filter(t => t.id !== id))));
   }
 
+  addException(id: string, date: string, type: ExceptionType): Observable<PlannedTask> {
+    return this.http
+      .post<PlannedTask>(`${this.base}/${id}/exceptions`, { date, type })
+      .pipe(tap(updated => this._tasks.update(list => list.map(t => (t.id === id ? updated : t)))));
+  }
+
+  removeException(id: string, date: string): Observable<PlannedTask> {
+    return this.http
+      .delete<void>(`${this.base}/${id}/exceptions/${date}`)
+      .pipe(
+        switchMap(() => this.loadOne(id)),
+        tap(updated => this._tasks.update(list => list.map(t => (t.id === id ? updated : t)))),
+      );
+  }
+
+  applyPermanently(
+    id: string,
+    date: string,
+    template: { weekdays?: Weekday[]; monthDays?: number[] },
+  ): Observable<PlannedTask> {
+    return this.removeException(id, date).pipe(
+      switchMap(() => this.update(id, template)),
+    );
+  }
+
   startTicker(): void {
     if (this.tickHandle) return;
     this.tickHandle = setInterval(() => this._now.set(new Date()), 60_000);
@@ -126,5 +176,9 @@ export class PlannedTaskService {
   stopTicker(): void {
     if (this.tickHandle) clearInterval(this.tickHandle);
     this.tickHandle = null;
+  }
+
+  private loadOne(id: string): Observable<PlannedTask> {
+    return this.http.get<PlannedTask>(`${this.base}/${id}`);
   }
 }

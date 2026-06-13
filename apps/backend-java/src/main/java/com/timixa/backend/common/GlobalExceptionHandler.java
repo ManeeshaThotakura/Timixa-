@@ -72,6 +72,18 @@ public class GlobalExceptionHandler {
             .body(ErrorResponse.of("VALIDATION_ERROR", e.getMessage()));
     }
 
+    @ExceptionHandler(ExceptionNotAllowedException.class)
+    public ResponseEntity<ErrorResponse> handleExceptionNotAllowed(ExceptionNotAllowedException e) {
+        return ResponseEntity.badRequest()
+            .body(ErrorResponse.of("EXCEPTION_NOT_ALLOWED", e.getMessage()));
+    }
+
+    @ExceptionHandler(ExceptionAlreadyExistsException.class)
+    public ResponseEntity<ErrorResponse> handleExceptionAlreadyExists(ExceptionAlreadyExistsException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+            .body(ErrorResponse.of("EXCEPTION_ALREADY_EXISTS", e.getMessage()));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleAny(Exception e) {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)

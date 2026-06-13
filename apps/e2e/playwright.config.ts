@@ -21,7 +21,7 @@ export default defineConfig({
       reuseExistingServer: true,
     },
     {
-      command: 'cd ../backend-java && ./mvnw spring-boot:run',
+      command: 'cd ../backend-java && SPRING_PROFILES_ACTIVE=dev ./mvnw spring-boot:run',
       url: 'http://localhost:8080/api/health',
       timeout: 120_000,
       reuseExistingServer: true,

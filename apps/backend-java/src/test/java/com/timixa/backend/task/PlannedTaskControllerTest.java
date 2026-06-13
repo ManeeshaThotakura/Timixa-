@@ -28,11 +28,13 @@ class PlannedTaskControllerTest {
     @Autowired UserRepository users;
     @Autowired PlannedTaskRepository tasks;
     @Autowired PlannedTaskCompletionRepository completions;
+    @Autowired PlannedTaskExceptionRepository exceptions;
 
     private String token;
 
     @BeforeEach
     void clean() throws Exception {
+        exceptions.deleteAll();
         completions.deleteAll();
         tasks.deleteAll();
         users.deleteAll();
@@ -51,7 +53,8 @@ class PlannedTaskControllerTest {
     void post_201_for_valid_daily() throws Exception {
         PlannedTaskRequest req = new PlannedTaskRequest(
             "Gym", "Fitness", null, Cadence.DAILY, true,
-            "09:00", "10:00", null, null, null);
+            "09:00", "10:00", null, null, null,
+            null, null, null, null);
         mvc.perform(post("/api/planned-tasks")
                 .header("Authorization", "Bearer " + token)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -66,7 +69,8 @@ class PlannedTaskControllerTest {
     void post_400_for_weekly_without_weekdays() throws Exception {
         PlannedTaskRequest req = new PlannedTaskRequest(
             "Run", null, null, Cadence.WEEKLY, true,
-            "07:00", "08:00", null, null, null);
+            "07:00", "08:00", null, null, null,
+            null, null, null, null);
         mvc.perform(post("/api/planned-tasks")
                 .header("Authorization", "Bearer " + token)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -78,7 +82,8 @@ class PlannedTaskControllerTest {
     @Test
     void post_401_without_token() throws Exception {
         PlannedTaskRequest req = new PlannedTaskRequest(
-            "X", null, null, Cadence.DAILY, true, "09:00", "10:00", null, null, null);
+            "X", null, null, Cadence.DAILY, true, "09:00", "10:00", null, null, null,
+            null, null, null, null);
         mvc.perform(post("/api/planned-tasks")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json.writeValueAsString(req)))
@@ -88,7 +93,8 @@ class PlannedTaskControllerTest {
     @Test
     void get_returns_daily_task() throws Exception {
         PlannedTaskRequest req = new PlannedTaskRequest(
-            "Gym", null, null, Cadence.DAILY, true, "09:00", "10:00", null, null, null);
+            "Gym", null, null, Cadence.DAILY, true, "09:00", "10:00", null, null, null,
+            null, null, null, null);
         mvc.perform(post("/api/planned-tasks")
                 .header("Authorization", "Bearer " + token)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -108,7 +114,8 @@ class PlannedTaskControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json.writeValueAsString(new PlannedTaskRequest(
                     "Gym", null, null, Cadence.DAILY, true,
-                    "09:00", "10:00", null, null, null))))
+                    "09:00", "10:00", null, null, null,
+                    null, null, null, null))))
             .andReturn().getResponse().getContentAsString();
         String id = json.readTree(body).get("id").asText();
 
@@ -135,7 +142,8 @@ class PlannedTaskControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json.writeValueAsString(new PlannedTaskRequest(
                     "Theirs", null, null, Cadence.DAILY, true,
-                    "09:00", "10:00", null, null, null))));
+                    "09:00", "10:00", null, null, null,
+                    null, null, null, null))));
 
         mvc.perform(get("/api/planned-tasks?date=" + LocalDate.now())
                 .header("Authorization", "Bearer " + token))
@@ -150,7 +158,8 @@ class PlannedTaskControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json.writeValueAsString(new PlannedTaskRequest(
                     "Gym", null, null, Cadence.DAILY, true,
-                    "09:00", "10:00", null, null, null))))
+                    "09:00", "10:00", null, null, null,
+                    null, null, null, null))))
             .andReturn().getResponse().getContentAsString();
         String id = json.readTree(body).get("id").asText();
 
@@ -162,5 +171,38 @@ class PlannedTaskControllerTest {
                 .header("Authorization", "Bearer " + token))
            .andExpect(status().isNotFound())
            .andExpect(jsonPath("$.code").value("TASK_NOT_FOUND"));
+    }
+
+    @Test
+    void post_201_round_trips_constraints() throws Exception {
+        PlannedTaskRequest req = new PlannedTaskRequest(
+            "Gym", "Fitness", null, Cadence.DAILY, true,
+            "09:00", "10:00", null, null, null,
+            30, 60, 5, 10);
+        mvc.perform(post("/api/planned-tasks")
+                .header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(req)))
+           .andExpect(status().isCreated())
+           .andExpect(jsonPath("$.minTimeMinutes").value(30))
+           .andExpect(jsonPath("$.maxTimeMinutes").value(60))
+           .andExpect(jsonPath("$.minCount").value(5))
+           .andExpect(jsonPath("$.maxCount").value(10))
+           .andExpect(jsonPath("$.exceptions").isArray())
+           .andExpect(jsonPath("$.exceptions").isEmpty());
+    }
+
+    @Test
+    void post_400_for_max_less_than_min_time() throws Exception {
+        PlannedTaskRequest req = new PlannedTaskRequest(
+            "Gym", null, null, Cadence.DAILY, true,
+            "09:00", "10:00", null, null, null,
+            60, 30, null, null);
+        mvc.perform(post("/api/planned-tasks")
+                .header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(req)))
+           .andExpect(status().isBadRequest())
+           .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
     }
 }

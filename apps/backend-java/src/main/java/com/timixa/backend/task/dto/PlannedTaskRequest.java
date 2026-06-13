@@ -17,5 +17,9 @@ public record PlannedTaskRequest(
     @Pattern(regexp = "^([01]\\d|2[0-3]):[0-5]\\d$", message = "must be HH:mm") String endTime,
     LocalDate scheduledDate,
     Set<DayOfWeek> weekdays,
-    Set<@Min(1) @Max(31) Integer> monthDays
+    Set<@Min(1) @Max(31) Integer> monthDays,
+    @Min(1) Integer minTimeMinutes,
+    @Min(1) Integer maxTimeMinutes,
+    @Min(1) Integer minCount,
+    @Min(1) Integer maxCount
 ) {}

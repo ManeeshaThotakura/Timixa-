@@ -16,7 +16,6 @@ const GOAL_ICONS: Record<string, string> = {
   Work: '💼', Mindfulness: '🧠', Social: '🤝',
 };
 
-
 @Component({
   selector: 'app-new-task',
   standalone: true,
@@ -82,110 +81,72 @@ const GOAL_ICONS: Record<string, string> = {
                style="font-family:Manrope;" />
       </section>
 
-      <!-- Section 3: Task Type -->
-      <section class="space-y-stack-sm">
-        <h2 class="font-semibold text-[16px] text-on-surface">Task Type</h2>
-        <div class="grid grid-cols-3 gap-stack-sm">
-          <button *ngFor="let t of taskTypes"
-                  (click)="taskType.set(t.value)"
-                  class="flex flex-col items-center justify-center p-4 rounded-[20px] active:scale-95 transition-all"
-                  [style.background]="taskType() === t.value ? '#5e43fb' : '#ffffff'"
-                  [style.boxShadow]="taskType() === t.value
-                    ? '0px 12px 24px rgba(94,67,251,0.25)'
-                    : '0px 8px 24px rgba(0,0,0,0.02)'">
-            <span class="material-symbols-outlined mb-2"
-                  [style.color]="taskType() === t.value ? '#ffffff' : '#787588'">
-              {{ t.icon }}
-            </span>
-            <span class="text-[11px] font-semibold"
-                  [style.color]="taskType() === t.value ? '#ffffff' : '#787588'">
-              {{ t.label }}
-            </span>
-          </button>
+      <!-- Section 3: Constraints (optional) -->
+      <section class="space-y-stack-sm" data-testid="constraints-section">
+        <h2 class="font-semibold text-[16px] text-on-surface">Constraints <span class="text-outline font-normal">(optional)</span></h2>
+
+        <div class="bg-surface-container-lowest rounded-[20px] border border-outline-variant/20 shadow-sm p-4" data-testid="time-card">
+          <label class="flex items-center justify-between cursor-pointer">
+            <span class="font-semibold text-[15px] text-on-surface">Time</span>
+            <div class="relative inline-flex items-center">
+              <input type="checkbox" class="sr-only peer"
+                     [checked]="timeConstraintEnabled()"
+                     (change)="timeConstraintEnabled.set($any($event.target).checked)"
+                     data-testid="time-toggle" />
+              <div class="w-11 h-6 bg-surface-container rounded-full peer
+                          peer-checked:bg-primary-container
+                          after:content-[''] after:absolute after:top-[2px] after:start-[2px]
+                          after:bg-white after:border after:border-gray-300 after:rounded-full
+                          after:h-5 after:w-5 after:transition-all
+                          peer-checked:after:translate-x-full"></div>
+            </div>
+          </label>
+          <div *ngIf="timeConstraintEnabled()" class="mt-3 grid grid-cols-2 gap-2" data-testid="time-fields">
+            <input type="number" min="1" placeholder="Min minutes"
+                   [value]="minTimeMinutes() ?? ''"
+                   (input)="minTimeMinutes.set(parseNum($any($event.target).value))"
+                   class="input-ghost" data-testid="time-min" />
+            <input type="number" min="1" placeholder="Max minutes"
+                   [value]="maxTimeMinutes() ?? ''"
+                   (input)="maxTimeMinutes.set(parseNum($any($event.target).value))"
+                   class="input-ghost" data-testid="time-max" />
+          </div>
+          <p *ngIf="timeConstraintEnabled()" class="text-[12px] text-outline mt-2">Either, both, or neither is fine.</p>
         </div>
+
+        <div class="bg-surface-container-lowest rounded-[20px] border border-outline-variant/20 shadow-sm p-4" data-testid="count-card">
+          <label class="flex items-center justify-between cursor-pointer">
+            <span class="font-semibold text-[15px] text-on-surface">Count</span>
+            <div class="relative inline-flex items-center">
+              <input type="checkbox" class="sr-only peer"
+                     [checked]="countConstraintEnabled()"
+                     (change)="countConstraintEnabled.set($any($event.target).checked)"
+                     data-testid="count-toggle" />
+              <div class="w-11 h-6 bg-surface-container rounded-full peer
+                          peer-checked:bg-primary-container
+                          after:content-[''] after:absolute after:top-[2px] after:start-[2px]
+                          after:bg-white after:border after:border-gray-300 after:rounded-full
+                          after:h-5 after:w-5 after:transition-all
+                          peer-checked:after:translate-x-full"></div>
+            </div>
+          </label>
+          <div *ngIf="countConstraintEnabled()" class="mt-3 grid grid-cols-2 gap-2" data-testid="count-fields">
+            <input type="number" min="1" placeholder="Min count"
+                   [value]="minCount() ?? ''"
+                   (input)="minCount.set(parseNum($any($event.target).value))"
+                   class="input-ghost" data-testid="count-min" />
+            <input type="number" min="1" placeholder="Max count"
+                   [value]="maxCount() ?? ''"
+                   (input)="maxCount.set(parseNum($any($event.target).value))"
+                   class="input-ghost" data-testid="count-max" />
+          </div>
+          <p *ngIf="countConstraintEnabled()" class="text-[12px] text-outline mt-2">Either, both, or neither is fine.</p>
+        </div>
+
+        <p *ngIf="constraintError()" class="text-red-500 text-sm" data-testid="constraint-error">{{ constraintError() }}</p>
       </section>
 
-      <!-- Section 4: Dynamic Parameters -->
-      <section class="p-6 rounded-[20px] border border-outline-variant/10"
-               style="background:rgba(238,238,240,0.4);">
-
-        <!-- Count -->
-        <ng-container *ngIf="taskType() === 'count'">
-          <div class="flex justify-between items-center mb-4">
-            <div>
-              <h3 class="font-semibold text-[16px] text-on-surface">Target count</h3>
-              <p class="text-label-sm text-outline mt-1">How many times per day?</p>
-            </div>
-            <div class="flex items-center gap-3 bg-white rounded-full p-1 shadow-sm border border-outline-variant/20">
-              <button (click)="decrement()"
-                      class="w-10 h-10 rounded-full flex items-center justify-center text-primary-container active:bg-primary-fixed transition-colors">
-                <span class="material-symbols-outlined">remove</span>
-              </button>
-              <span class="font-bold text-[18px] min-w-[2ch] text-center text-on-surface" style="font-family:Manrope;">
-                {{ targetCount() }}
-              </span>
-              <button (click)="increment()"
-                      class="w-10 h-10 rounded-full flex items-center justify-center text-primary-container active:bg-primary-fixed transition-colors">
-                <span class="material-symbols-outlined">add</span>
-              </button>
-            </div>
-          </div>
-          <div class="flex items-start gap-2 p-3 rounded-xl" style="background:rgba(194,232,255,0.3);">
-            <span class="material-symbols-outlined text-secondary text-[18px] mt-0.5">info</span>
-            <p class="text-[13px] text-on-surface leading-snug">
-              You will tap <span class="font-bold">+</span> to track progress on your dashboard.
-            </p>
-          </div>
-        </ng-container>
-
-        <!-- Time -->
-        <ng-container *ngIf="taskType() === 'time'">
-          <div class="flex justify-between items-center mb-4">
-            <div>
-              <h3 class="font-semibold text-[16px] text-on-surface">Duration</h3>
-              <p class="text-label-sm text-outline mt-1">Minutes per session</p>
-            </div>
-            <div class="flex items-center gap-3 bg-white rounded-full p-1 shadow-sm border border-outline-variant/20">
-              <button (click)="decrementTime()"
-                      class="w-10 h-10 rounded-full flex items-center justify-center text-primary-container active:bg-primary-fixed transition-colors">
-                <span class="material-symbols-outlined">remove</span>
-              </button>
-              <span class="font-bold text-[18px] min-w-[3ch] text-center text-on-surface" style="font-family:Manrope;">
-                {{ targetMinutes() }}
-              </span>
-              <button (click)="incrementTime()"
-                      class="w-10 h-10 rounded-full flex items-center justify-center text-primary-container active:bg-primary-fixed transition-colors">
-                <span class="material-symbols-outlined">add</span>
-              </button>
-            </div>
-          </div>
-          <div class="flex items-start gap-2 p-3 rounded-xl" style="background:rgba(194,232,255,0.3);">
-            <span class="material-symbols-outlined text-secondary text-[18px] mt-0.5">info</span>
-            <p class="text-[13px] text-on-surface leading-snug">A timer will track your progress during the session.</p>
-          </div>
-        </ng-container>
-
-        <!-- Frequency -->
-        <ng-container *ngIf="taskType() === 'frequency'">
-          <h3 class="font-semibold text-[16px] text-on-surface mb-3">How often?</h3>
-          <div class="grid grid-cols-3 gap-2 mb-4">
-            <button *ngFor="let f of frequencies"
-                    (click)="selectedFrequency.set(f.value)"
-                    class="py-2.5 rounded-xl text-[12px] font-semibold transition-all active:scale-95"
-                    [style.background]="selectedFrequency() === f.value ? '#451de3' : '#f3f3f6'"
-                    [style.color]="selectedFrequency() === f.value ? '#ffffff' : '#787588'">
-              {{ f.label }}
-            </button>
-          </div>
-          <div class="flex items-start gap-2 p-3 rounded-xl" style="background:rgba(194,232,255,0.3);">
-            <span class="material-symbols-outlined text-secondary text-[18px] mt-0.5">info</span>
-            <p class="text-[13px] text-on-surface leading-snug">Appears on your dashboard on scheduled days.</p>
-          </div>
-        </ng-container>
-
-      </section>
-
-      <!-- Section 4b: Needs time slot toggle -->
+      <!-- Section 4: Needs time slot toggle -->
       <section>
         <div class="bg-surface-container-lowest rounded-[20px] border border-outline-variant/20 shadow-sm p-4">
           <label class="flex items-start justify-between gap-3 cursor-pointer">
@@ -292,27 +253,21 @@ const GOAL_ICONS: Record<string, string> = {
         <p class="font-label-sm text-outline mb-stack-sm uppercase tracking-wider">Preview</p>
         <div class="p-6 rounded-[20px] bg-white border border-primary-fixed/30"
              style="box-shadow:0 8px 24px rgba(94,67,251,0.06);">
-          <div class="flex justify-between items-center mb-4">
-            <div class="flex items-center gap-3">
-              <div class="w-10 h-10 rounded-full flex items-center justify-center"
-                   style="background:rgba(194,232,255,0.6);">
-                <span class="material-symbols-outlined text-secondary">{{ previewIcon() }}</span>
-              </div>
-              <div>
-                <h4 class="font-bold text-[16px] text-on-surface leading-none">
-                  {{ taskName().trim() || 'Task Name' }}
-                </h4>
-                <p class="text-label-sm text-outline mt-1">{{ previewGoalLabel() }}</p>
-              </div>
+          <div class="flex items-center gap-3 mb-3">
+            <div class="w-10 h-10 rounded-full flex items-center justify-center"
+                 style="background:rgba(194,232,255,0.6);">
+              <span class="material-symbols-outlined text-secondary">{{ previewIcon() }}</span>
             </div>
-            <span class="font-extrabold text-primary-container" style="font-family:Manrope;">
-              {{ previewCounter() }}
-            </span>
+            <div class="min-w-0 flex-1">
+              <h4 class="font-bold text-[16px] text-on-surface leading-none truncate">
+                {{ taskName().trim() || 'Task Name' }}
+              </h4>
+              <p class="text-label-sm text-outline mt-1">{{ selectedGoal() }}</p>
+            </div>
           </div>
-          <div class="w-full h-2.5 bg-surface-container rounded-full overflow-hidden">
-            <div class="h-full w-[5%] rounded-full"
-                 style="background:linear-gradient(90deg,#451de3,#00c1fd);"></div>
-          </div>
+          <p *ngIf="constraintSummary() as cs" class="text-[13px] text-on-surface-variant" data-testid="constraint-summary">
+            {{ cs }}
+          </p>
         </div>
       </section>
 
@@ -380,10 +335,6 @@ export class NewTaskComponent {
   goals             = signal<string[]>(['Fitness', 'Learning', 'Health']);
   selectedGoal      = signal<string>('Fitness');
   taskName          = signal<string>('');
-  taskType          = signal<'time' | 'count' | 'frequency'>('count');
-  targetCount       = signal<number>(10);
-  targetMinutes     = signal<number>(60);
-  selectedFrequency = signal<string>('daily');
   notifyAtStart     = signal<boolean>(true);
   notifyAtEnd       = signal<boolean>(false);
   nightReminder     = signal<boolean>(true);
@@ -392,19 +343,13 @@ export class NewTaskComponent {
   showGoalModal     = signal<boolean>(false);
   newGoalName       = signal<string>('');
 
-  taskTypes = [
-    { value: 'time'      as const, label: 'Time',      icon: 'schedule'     },
-    { value: 'count'     as const, label: 'Count',     icon: 'counter_3'    },
-    { value: 'frequency' as const, label: 'Frequency', icon: 'event_repeat' },
-  ];
-
-  frequencies = [
-    { value: 'daily',       label: 'Daily'      },
-    { value: 'weekdays',    label: 'Weekdays'   },
-    { value: 'weekends',    label: 'Weekends'   },
-    { value: 'mon-wed-fri', label: 'M/W/F'      },
-    { value: 'custom',      label: 'Custom'     },
-  ];
+  timeConstraintEnabled  = signal(false);
+  minTimeMinutes         = signal<number | null>(null);
+  maxTimeMinutes         = signal<number | null>(null);
+  countConstraintEnabled = signal(false);
+  minCount               = signal<number | null>(null);
+  maxCount               = signal<number | null>(null);
+  constraintError        = signal<string | null>(null);
 
   previewIcon = computed(() => {
     const n = this.taskName().toLowerCase();
@@ -416,26 +361,31 @@ export class NewTaskComponent {
     return 'task_alt';
   });
 
-  previewGoalLabel = computed(() => {
-    if (this.taskType() === 'count')     return `Goal: ${this.targetCount()} times today`;
-    if (this.taskType() === 'time')      return `Goal: ${this.targetMinutes()} min today`;
-    return `Goal: ${this.selectedFrequency()}`;
-  });
-
-  previewCounter = computed(() => {
-    if (this.taskType() === 'count') return `0/${this.targetCount()}`;
-    if (this.taskType() === 'time')  return `0m/${this.targetMinutes()}m`;
-    return '0%';
+  constraintSummary = computed<string | null>(() => {
+    const parts: string[] = [];
+    if (this.timeConstraintEnabled()) {
+      const mn = this.minTimeMinutes(), mx = this.maxTimeMinutes();
+      if (mn != null && mx != null) parts.push(`⏱ ${mn}–${mx} min`);
+      else if (mn != null) parts.push(`⏱ ≥ ${mn} min`);
+      else if (mx != null) parts.push(`⏱ ≤ ${mx} min`);
+    }
+    if (this.countConstraintEnabled()) {
+      const mn = this.minCount(), mx = this.maxCount();
+      if (mn != null && mx != null) parts.push(`🔢 ${mn}–${mx} ×`);
+      else if (mn != null) parts.push(`🔢 ≥ ${mn} ×`);
+      else if (mx != null) parts.push(`🔢 ≤ ${mx} ×`);
+    }
+    return parts.length ? parts.join(' · ') : null;
   });
 
   goalIcon(goal: string): string {
     return GOAL_ICONS[goal] ?? '🎯';
   }
 
-  increment():     void { this.targetCount.update(n => n + 1); }
-  decrement():     void { this.targetCount.update(n => Math.max(1, n - 1)); }
-  incrementTime(): void { this.targetMinutes.update(n => n + 15); }
-  decrementTime(): void { this.targetMinutes.update(n => Math.max(15, n - 15)); }
+  parseNum(v: string): number | null {
+    const n = parseInt(v, 10);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
 
   scheduleSummary(): string {
     const c = this.scheduleConfig();
@@ -466,6 +416,17 @@ export class NewTaskComponent {
   createTask(): void {
     const title = this.taskName().trim();
     if (!title) return;
+    this.constraintError.set(null);
+    if (this.timeConstraintEnabled()
+        && this.minTimeMinutes() != null && this.maxTimeMinutes() != null
+        && this.maxTimeMinutes()! < this.minTimeMinutes()!) {
+      this.constraintError.set('Max minutes must be at least Min minutes'); return;
+    }
+    if (this.countConstraintEnabled()
+        && this.minCount() != null && this.maxCount() != null
+        && this.maxCount()! < this.minCount()!) {
+      this.constraintError.set('Max count must be at least Min count'); return;
+    }
     const input = this.toPlannedTaskInput(title);
     this.saving.set(true);
     this.error.set(null);
@@ -491,8 +452,7 @@ export class NewTaskComponent {
 
   private toPlannedTaskInput(title: string): PlannedTaskInput {
     const cfg = this.scheduleConfig();
-    const isTimeTask = this.taskType() === 'time';
-    const minutes = isTimeTask ? this.targetMinutes() : 30;
+    const minutes = 30;
     const needsTimeSlot = this.needsTimeSlot();
 
     let cadence: PlannedTaskCadence;
@@ -522,6 +482,11 @@ export class NewTaskComponent {
       endTime = cfg.endTime || this.addMinutesToTime(cfg.startTime, minutes);
     }
 
+    const minTimeMinutes = this.timeConstraintEnabled() ? this.minTimeMinutes() : null;
+    const maxTimeMinutes = this.timeConstraintEnabled() ? this.maxTimeMinutes() : null;
+    const minCount       = this.countConstraintEnabled() ? this.minCount() : null;
+    const maxCount       = this.countConstraintEnabled() ? this.maxCount() : null;
+
     return {
       title,
       goal: this.selectedGoal(),
@@ -532,6 +497,10 @@ export class NewTaskComponent {
       endTime,
       weekdays,
       monthDays,
+      minTimeMinutes,
+      maxTimeMinutes,
+      minCount,
+      maxCount,
     };
   }
 

@@ -54,6 +54,18 @@ public class PlannedTask {
     @Column(name = "month_days", length = 96)
     private String monthDays;
 
+    @Column(name = "min_time_minutes")
+    private Integer minTimeMinutes;
+
+    @Column(name = "max_time_minutes")
+    private Integer maxTimeMinutes;
+
+    @Column(name = "min_count")
+    private Integer minCount;
+
+    @Column(name = "max_count")
+    private Integer maxCount;
+
     @CreatedDate
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -119,6 +131,14 @@ public class PlannedTask {
     public void setWeekdays(String weekdays) { this.weekdays = weekdays; }
     public String getMonthDays() { return monthDays; }
     public void setMonthDays(String monthDays) { this.monthDays = monthDays; }
+    public Integer getMinTimeMinutes() { return minTimeMinutes; }
+    public void setMinTimeMinutes(Integer v) { this.minTimeMinutes = v; }
+    public Integer getMaxTimeMinutes() { return maxTimeMinutes; }
+    public void setMaxTimeMinutes(Integer v) { this.maxTimeMinutes = v; }
+    public Integer getMinCount() { return minCount; }
+    public void setMinCount(Integer v) { this.minCount = v; }
+    public Integer getMaxCount() { return maxCount; }
+    public void setMaxCount(Integer v) { this.maxCount = v; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
 }
