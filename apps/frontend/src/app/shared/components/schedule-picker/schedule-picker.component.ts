@@ -45,8 +45,8 @@ interface FrequencyTab {
         </p>
       </div>
 
-      <!-- Start row: date + time -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
+      <!-- Start row: date + time (hidden for all-day notify-only tasks) -->
+      <div *ngIf="needsTimeSlot" class="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
         <div class="min-w-0">
           <label class="block text-[10px] sm:text-[11px] font-bold text-outline uppercase ml-1 mb-1">
             Start Date <span class="font-normal text-outline-variant lowercase">(optional)</span>
@@ -69,8 +69,8 @@ interface FrequencyTab {
         </div>
       </div>
 
-      <!-- End row: date + time -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
+      <!-- End row: date + time (hidden for all-day notify-only tasks) -->
+      <div *ngIf="needsTimeSlot" class="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
         <div class="min-w-0">
           <label class="block text-[10px] sm:text-[11px] font-bold text-outline uppercase ml-1 mb-1">
             End Date <span class="font-normal text-outline-variant lowercase">(optional)</span>
@@ -93,8 +93,8 @@ interface FrequencyTab {
         </div>
       </div>
 
-      <!-- Repeat every (interval) -->
-      <div class="pt-3 border-t border-outline-variant/10">
+      <!-- Repeat every (interval) — hidden when "Never" -->
+      <div *ngIf="config.frequency !== 'never'" class="pt-3 border-t border-outline-variant/10">
         <div class="flex items-center justify-between gap-2 flex-wrap">
           <span class="text-[14px] sm:text-body-md font-medium">
             Repeat every <span class="font-normal text-outline text-[11px] sm:text-[12px]">(Optional)</span>
@@ -202,7 +202,8 @@ interface FrequencyTab {
       </div>
 
       <!-- Ends -->
-      <div class="pt-3 border-t border-outline-variant/10 space-y-3">
+      <!-- Ends — hidden when "Never" (nothing recurring to end) -->
+      <div *ngIf="config.frequency !== 'never'" class="pt-3 border-t border-outline-variant/10 space-y-3">
         <label class="block text-[10px] sm:text-[11px] font-bold text-outline uppercase ml-1">Ends</label>
         <div class="flex gap-1.5 sm:gap-2">
           <button type="button" *ngFor="let opt of endsModes"
@@ -274,6 +275,7 @@ interface FrequencyTab {
 export class SchedulePickerComponent implements OnInit {
   @Input() value: ScheduleConfig | null = null;
   @Input() lockedFrequency: Frequency | null = null;
+  @Input() needsTimeSlot = true;
   @Output() valueChange = new EventEmitter<ScheduleConfig>();
 
   config: ScheduleConfig = { ...defaultScheduleConfig };
@@ -284,6 +286,7 @@ export class SchedulePickerComponent implements OnInit {
   advBuffer = 0;
 
   readonly frequencies: FrequencyTab[] = [
+    { value: 'never', label: 'Never' },
     { value: 'daily', label: 'Daily' },
     { value: 'weekly', label: 'Weekly' },
     { value: 'monthly', label: 'Monthly' },
@@ -352,6 +355,7 @@ export class SchedulePickerComponent implements OnInit {
 
   get unitLabel(): string {
     const map: Record<Frequency, string> = {
+      never: '',
       daily: this.config.interval === 1 ? 'day' : 'days',
       weekly: this.config.interval === 1 ? 'week' : 'weeks',
       monthly: this.config.interval === 1 ? 'month' : 'months',
@@ -362,6 +366,11 @@ export class SchedulePickerComponent implements OnInit {
 
   get summary(): string {
     const c = this.config;
+    if (c.frequency === 'never') {
+      return c.startDate
+        ? `One-time task on ${c.startDate}.`
+        : 'One-time task.';
+    }
     const every = c.interval > 1 ? `every ${c.interval} ${this.unitLabel}` : `every ${this.unitLabel.replace(/s$/, '')}`;
     let detail = '';
     if (c.frequency === 'daily' && c.dailyOption && c.dailyOption !== 'every-day') {

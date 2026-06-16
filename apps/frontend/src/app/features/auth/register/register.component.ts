@@ -1,7 +1,7 @@
 import { Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { RouterModule } from '@angular/router';
+import { Router, RouterModule } from '@angular/router';
 import { AuthService } from '../../../core/services/auth.service';
 
 @Component({
@@ -28,19 +28,21 @@ import { AuthService } from '../../../core/services/auth.service';
           <div class="space-y-4">
             <div>
               <label class="font-label-sm text-label-sm text-on-surface-variant uppercase mb-2 block">Full Name</label>
-              <input type="text" [(ngModel)]="name" placeholder="Alex Carter" class="input-ghost" />
+              <input type="text" [(ngModel)]="name" name="name" placeholder="Alex Carter" class="input-ghost" data-testid="register-name" />
             </div>
             <div>
               <label class="font-label-sm text-label-sm text-on-surface-variant uppercase mb-2 block">Email</label>
-              <input type="email" [(ngModel)]="email" placeholder="you@example.com" class="input-ghost" />
+              <input type="email" [(ngModel)]="email" name="email" placeholder="you@example.com" class="input-ghost" data-testid="register-email" />
             </div>
             <div>
               <label class="font-label-sm text-label-sm text-on-surface-variant uppercase mb-2 block">Password</label>
-              <input type="password" [(ngModel)]="password" placeholder="Create a strong password" class="input-ghost" />
+              <input type="password" [(ngModel)]="password" name="password" placeholder="Create a strong password" class="input-ghost" data-testid="register-password" />
             </div>
           </div>
 
-          <button (click)="register()" [disabled]="loading" class="btn-primary w-full mt-6 flex items-center justify-center gap-2">
+          <p *ngIf="error" class="text-red-500 text-sm mt-3" data-testid="register-error">{{ error }}</p>
+
+          <button (click)="register()" [disabled]="loading" class="btn-primary w-full mt-6 flex items-center justify-center gap-2" data-testid="register-submit">
             <span *ngIf="loading" class="material-symbols-outlined text-[18px] animate-spin">progress_activity</span>
             <span>{{ loading ? 'Creating account...' : 'Get Started' }}</span>
           </button>
@@ -56,18 +58,34 @@ import { AuthService } from '../../../core/services/auth.service';
 })
 export class RegisterComponent {
   private auth = inject(AuthService);
+  private router = inject(Router);
 
   name = '';
   email = '';
   password = '';
   loading = false;
+  error: string | null = null;
 
   register(): void {
     if (!this.name || !this.email || !this.password) return;
     this.loading = true;
-    setTimeout(() => {
-      this.auth.register(this.name, this.email, this.password);
-      this.loading = false;
-    }, 600);
+    this.error = null;
+    this.auth.register({ name: this.name, email: this.email, password: this.password }).subscribe({
+      next: () => {
+        this.loading = false;
+        this.router.navigateByUrl('/onboarding');
+      },
+      error: (err) => {
+        this.loading = false;
+        if (err?.error?.code === 'EMAIL_TAKEN') {
+          this.error = 'Email already in use';
+        } else if (err?.error?.code === 'VALIDATION_ERROR') {
+          const f = err.error.fields || {};
+          this.error = (Object.values(f)[0] as string) || 'Please check your input';
+        } else {
+          this.error = err?.error?.message || 'Registration failed';
+        }
+      },
+    });
   }
 }

@@ -33,8 +33,10 @@ import { AuthService } from '../../../core/services/auth.service';
               <input
                 type="email"
                 [(ngModel)]="email"
+                name="email"
                 placeholder="you@example.com"
-                class="input-ghost" />
+                class="input-ghost"
+                data-testid="login-email" />
             </div>
 
             <div>
@@ -42,15 +44,20 @@ import { AuthService } from '../../../core/services/auth.service';
               <input
                 type="password"
                 [(ngModel)]="password"
+                name="password"
                 placeholder="••••••••"
-                class="input-ghost" />
+                class="input-ghost"
+                data-testid="login-password" />
             </div>
           </div>
+
+          <p *ngIf="error" class="text-red-500 text-sm mt-3" data-testid="login-error">{{ error }}</p>
 
           <button
             (click)="login()"
             [disabled]="loading"
-            class="btn-primary w-full mt-6 flex items-center justify-center gap-2">
+            class="btn-primary w-full mt-6 flex items-center justify-center gap-2"
+            data-testid="login-submit">
             <span *ngIf="loading" class="material-symbols-outlined text-[18px] animate-spin">progress_activity</span>
             <span>{{ loading ? 'Signing in...' : 'Sign In' }}</span>
           </button>
@@ -66,17 +73,26 @@ import { AuthService } from '../../../core/services/auth.service';
 })
 export class LoginComponent {
   private auth = inject(AuthService);
+  private router = inject(Router);
 
   email = '';
   password = '';
   loading = false;
+  error: string | null = null;
 
   login(): void {
     if (!this.email || !this.password) return;
     this.loading = true;
-    setTimeout(() => {
-      this.auth.login(this.email, this.password);
-      this.loading = false;
-    }, 600);
+    this.error = null;
+    this.auth.login({ email: this.email, password: this.password }).subscribe({
+      next: () => {
+        this.loading = false;
+        this.router.navigateByUrl('/dashboard');
+      },
+      error: (err) => {
+        this.loading = false;
+        this.error = err?.error?.message || 'Invalid credentials';
+      },
+    });
   }
 }

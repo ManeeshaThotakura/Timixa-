@@ -2,15 +2,16 @@ import { Component, OnInit, OnDestroy, inject, signal, computed, NgZone } from '
 import { CommonModule, DOCUMENT } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, ActivatedRoute } from '@angular/router';
-import { ScheduleService } from '../../../core/services/schedule.service';
-import { ScheduledEvent, UnscheduledTask } from '../../../core/models/schedule.model';
+import { PlannedTaskService } from '../../../core/services/planned-task.service';
+import { PlannedTask } from '../../../core/models/planned-task.model';
+import { ExceptionPopupComponent } from '../exception-popup.component';
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i); // 00:00 – 23:00
 
 @Component({
   selector: 'app-schedule-day',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, ExceptionPopupComponent],
   template: `
     <!-- Segmented Control -->
     <div class="px-margin-page mt-stack-md">
@@ -86,8 +87,7 @@ const HOURS = Array.from({ length: 24 }, (_, i) => i); // 00:00 – 23:00
           </div>
           <p class="font-semibold text-[15px] text-on-surface mb-1 truncate">{{ task.title }}</p>
           <div class="flex items-center justify-between text-[11px] text-on-surface-variant">
-            <span>Due {{ task.dueDate | date:'MMM d' }}</span>
-            <span class="font-bold text-primary">{{ task.remainingMinutes }}m left</span>
+            <span class="text-outline">{{ task.cadence }}</span>
           </div>
         </div>
       </div>
@@ -127,26 +127,26 @@ const HOURS = Array.from({ length: 24 }, (_, i) => i); // 00:00 – 23:00
                  style="box-shadow:0 2px 8px rgba(0,0,0,0.06); touch-action: none;"
                  [style.opacity]="movingEventId() === evt.id ? '0.35' : '1'"
                  [ngStyle]="getEventBoxStyle(evt)"
-                 [style.background]="getEventBg(evt.type)"
-                 [style.borderLeftColor]="getEventBorder(evt.type, evt.color)"
+                 [style.background]="getEventBg()"
+                 [style.borderLeftColor]="getEventBorder(evt.color)"
                  (mousedown)="onEventDown($event, evt)"
                  (touchstart)="onEventDown($event, evt)">
               <span class="material-symbols-outlined text-[16px] flex-shrink-0 opacity-70 -ml-1.5 relative z-10"
-                    [style.color]="getEventBorder(evt.type, evt.color)"
+                    [style.color]="getEventBorder(evt.color)"
                     style="cursor: grab; touch-action: none;">
                 drag_indicator
               </span>
               <span class="material-symbols-outlined text-sm flex-shrink-0"
-                    [style.color]="getEventBorder(evt.type, evt.color)">
-                {{ getEventIcon(evt.type) }}
+                    [style.color]="getEventBorder(evt.color)">
+                task_alt
               </span>
               <span class="text-sm font-semibold truncate flex-1"
-                    [style.color]="getEventBorder(evt.type, evt.color)">
+                    [style.color]="getEventBorder(evt.color)">
                 {{ evt.title }}
               </span>
               <span class="text-[10px] font-medium flex-shrink-0"
-                    [style.color]="getEventBorder(evt.type, evt.color)">
-                {{ resizingEventId() === evt.id ? resizingTimeLabel() : evt.startTime + '–' + evt.endTime }}
+                    [style.color]="getEventBorder(evt.color)">
+                {{ resizingEventId() === evt.id ? resizingTimeLabel() : (evt.startTime || '') + '–' + (evt.endTime || '') }}
               </span>
 
               <!-- Resize handle (kept narrow & off the left edge so it never overlaps the drag indicator) -->
@@ -200,15 +200,6 @@ const HOURS = Array.from({ length: 24 }, (_, i) => i); // 00:00 – 23:00
         <h3 class="font-bold text-[20px] text-on-surface mb-1 font-manrope">Edit schedule</h3>
         <p class="text-[13px] text-on-surface-variant mb-5 truncate">{{ editingEvent()?.title }}</p>
 
-        <div class="mb-3 min-w-0">
-          <label class="block text-[10px] font-bold text-outline uppercase ml-1 mb-1">Date</label>
-          <div class="flex items-center gap-1.5 px-2.5 py-2.5 bg-surface-container-low rounded-xl min-w-0">
-            <span class="material-symbols-outlined text-on-surface-variant text-[16px] flex-shrink-0">event</span>
-            <input type="date" [(ngModel)]="editDate"
-                   class="flex-1 min-w-0 w-full bg-transparent border-none focus:ring-0 text-[14px] p-0" />
-          </div>
-        </div>
-
         <div class="grid grid-cols-2 gap-3 mb-5">
           <div class="min-w-0">
             <label class="block text-[10px] font-bold text-outline uppercase ml-1 mb-1">Start</label>
@@ -246,32 +237,45 @@ const HOURS = Array.from({ length: 24 }, (_, i) => i); // 00:00 – 23:00
         </div>
       </div>
     </div>
+
+    <!-- Skip / exception popup -->
+    <app-exception-popup
+      *ngIf="popupVisible()"
+      [title]="popupTitle()"
+      [yesLabel]="popupYesLabel()"
+      [noLabel]="popupNoLabel()"
+      (yes)="onPopupYes()"
+      (no)="onPopupNo()">
+    </app-exception-popup>
   `,
 })
 export class ScheduleDayComponent implements OnInit, OnDestroy {
   router = inject(Router);
   private route = inject(ActivatedRoute);
-  private scheduleService = inject(ScheduleService);
+  private plannedTasks = inject(PlannedTaskService);
   private zone = inject(NgZone);
   private doc = inject(DOCUMENT);
 
   currentDate = new Date();
   hours = HOURS;
-  draggingTask = signal<UnscheduledTask | null>(null);
+  draggingTask = signal<PlannedTask | null>(null);
   dragOverHour = signal<number | null>(null);
+
+  // Local signal holding tasks for the displayed day
+  tasksForDay = signal<PlannedTask[]>([]);
 
   // Resize state
   resizingEventId = signal<string | null>(null);
   resizingHeight = signal<number>(0);
   private resizeStartY = 0;
   private resizeStartHeight = 0;
-  private resizeEvent: ScheduledEvent | null = null;
+  private resizeEvent: PlannedTask | null = null;
   private readonly boundResizeMove = (e: MouseEvent | TouchEvent) => this.onResizeMove(e);
   private readonly boundResizeEnd = (e: MouseEvent | TouchEvent) => this.onResizeEnd(e);
 
   // Pointer-drag (click-or-move) state
   private moveDrag: {
-    evt: ScheduledEvent;
+    evt: PlannedTask;
     startX: number; startY: number;
     isDragging: boolean;
     hoverHour: number | null;
@@ -282,25 +286,32 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
   private readonly boundMoveEnd = (e: MouseEvent | TouchEvent) => this.onMoveEnd(e);
 
   // Edit modal state
-  editingEvent = signal<ScheduledEvent | null>(null);
-  editDate = '';
+  editingEvent = signal<PlannedTask | null>(null);
   editStart = '';
   editEnd = '';
 
+  // Exception/skip popup state
+  popupVisible = signal(false);
+  popupTitle = signal('');
+  popupYesLabel = signal('Yes, every week');
+  popupNoLabel = signal('No, just this date');
+  private popupOnYes: (() => void) | null = null;
+  private popupOnNo: (() => void) | null = null;
+
   editDeltaLabel = computed(() => {
     const evt = this.editingEvent();
-    if (!evt) return '';
+    if (!evt || !evt.startTime || !evt.endTime) return '';
     const oldDur = this.diffMinutes(evt.startTime, evt.endTime);
     const newDur = this.diffMinutes(this.editStart, this.editEnd);
     if (newDur === oldDur || newDur <= 0) return '';
     const delta = oldDur - newDur;
     return delta > 0
-      ? `${delta}m will be returned to unscheduled`
-      : `${-delta}m will be taken from unscheduled`;
+      ? `${delta}m freed up`
+      : `${-delta}m added`;
   });
 
   resizingTimeLabel = computed(() => {
-    if (!this.resizeEvent) return '';
+    if (!this.resizeEvent || !this.resizeEvent.startTime) return '';
     const minutes = this.pixelsToMinutes(this.resizingHeight());
     const end = this.addMinutesToTime(this.resizeEvent.startTime, minutes);
     return `${this.resizeEvent.startTime}–${end}`;
@@ -314,13 +325,6 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
 
   highlightedTaskId = signal<string | null>(null);
 
-  get unscheduledTasks() {
-    const id  = this.highlightedTaskId();
-    const all = this.scheduleService.unscheduledTasks().filter(t => t.remainingMinutes > 0);
-    if (!id) return all;
-    return [...all.filter(t => t.id === id), ...all.filter(t => t.id !== id)];
-  }
-
   // Touch drag state
   private touchClone: HTMLElement | null = null;
   private touchDragOverHour: number | null = null;
@@ -331,8 +335,15 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
     return this.currentDate.toISOString().split('T')[0];
   }
 
-  get todayEvents(): ScheduledEvent[] {
-    return this.scheduleService.getByDate(this.dateStr);
+  get unscheduledTasks(): PlannedTask[] {
+    const id = this.highlightedTaskId();
+    const all = this.tasksForDay().filter(t => t.needsTimeSlot && !t.startTime);
+    if (!id) return all;
+    return [...all.filter(t => t.id === id), ...all.filter(t => t.id !== id)];
+  }
+
+  get todayEvents(): PlannedTask[] {
+    return this.tasksForDay().filter(t => !!t.startTime && !!t.endTime);
   }
 
   get progressPercent(): number {
@@ -345,7 +356,6 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
-    this.scheduleService.load();
     const snap = this.route.snapshot.queryParamMap;
 
     const dateParam = snap.get('date');
@@ -356,6 +366,8 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
 
     const taskId = snap.get('taskId');
     if (taskId) this.highlightedTaskId.set(taskId);
+
+    this.reload();
   }
 
   ngOnDestroy(): void {
@@ -363,12 +375,16 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
     this.cancelMoveDrag();
   }
 
+  private reload(): void {
+    this.plannedTasks.loadForDate(this.dateStr).subscribe(list => this.tasksForDay.set(list));
+  }
+
   formatHour(h: number): string {
     return `${h.toString().padStart(2, '0')}:00`;
   }
 
-  getEventsForHour(hour: number): ScheduledEvent[] {
-    return this.todayEvents.filter(e => parseInt(e.startTime.split(':')[0], 10) === hour);
+  getEventsForHour(hour: number): PlannedTask[] {
+    return this.todayEvents.filter(e => e.startTime && parseInt(e.startTime.split(':')[0], 10) === hour);
   }
 
   // ── Overlap layout ──────────────────────────────────────────────────
@@ -377,32 +393,32 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
     return h * 60 + m;
   }
 
-  private computeLayout(events: ScheduledEvent[]): Map<string, { col: number; count: number }> {
+  private computeLayout(events: PlannedTask[]): Map<string, { col: number; count: number }> {
     const result = new Map<string, { col: number; count: number }>();
     if (events.length === 0) return result;
-    const sorted = [...events].sort((a, b) => this.toMin(a.startTime) - this.toMin(b.startTime));
-    let cluster: ScheduledEvent[] = [];
+    const sorted = [...events].sort((a, b) => this.toMin(a.startTime!) - this.toMin(b.startTime!));
+    let cluster: PlannedTask[] = [];
     let clusterEnd = -1;
     const flush = () => {
       if (!cluster.length) return;
       const cols: number[] = [];
       const assigns: number[] = [];
       for (const evt of cluster) {
-        const start = this.toMin(evt.startTime);
+        const start = this.toMin(evt.startTime!);
         let assigned = -1;
         for (let i = 0; i < cols.length; i++) {
           if (cols[i] <= start) { assigned = i; break; }
         }
         if (assigned === -1) { assigned = cols.length; cols.push(0); }
-        cols[assigned] = this.toMin(evt.endTime);
+        cols[assigned] = this.toMin(evt.endTime!);
         assigns.push(assigned);
       }
       const count = cols.length;
       cluster.forEach((evt, i) => result.set(evt.id, { col: assigns[i], count }));
     };
     for (const evt of sorted) {
-      const s = this.toMin(evt.startTime);
-      const e = this.toMin(evt.endTime);
+      const s = this.toMin(evt.startTime!);
+      const e = this.toMin(evt.endTime!);
       if (s < clusterEnd) {
         cluster.push(evt);
         clusterEnd = Math.max(clusterEnd, e);
@@ -426,9 +442,9 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
     return n;
   }
 
-  getEventBoxStyle(evt: ScheduledEvent): Record<string, string> {
+  getEventBoxStyle(evt: PlannedTask): Record<string, string> {
     const isResizing = this.resizingEventId() === evt.id;
-    const height = isResizing ? this.resizingHeight() : this.getEventHeight(evt.startTime, evt.endTime);
+    const height = isResizing ? this.resizingHeight() : this.getEventHeight(evt.startTime!, evt.endTime!);
     const layout = this.dayLayout.get(evt.id);
     const style: Record<string, string> = {
       top: '2px',
@@ -452,25 +468,16 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
     return Math.max(36, ((toMin(endTime) - toMin(startTime)) / 60) * 80 - 4);
   }
 
-  getEventBg(type: string): string {
-    if (type === 'habit') return 'rgba(194,232,255,0.4)';
-    if (type === 'meeting') return '#E8F5E9';
+  // All planned tasks are "task" type — use task styling for all
+  getEventBg(): string {
     return 'rgba(228,223,255,0.4)';
   }
 
-  getEventBorder(type: string, color: string): string {
-    if (type === 'habit') return '#006688';
-    if (type === 'meeting') return '#2E7D32';
+  getEventBorder(color: string): string {
     return color || '#451de3';
   }
 
-  getEventIcon(type: string): string {
-    if (type === 'habit') return 'self_improvement';
-    if (type === 'meeting') return 'groups';
-    return 'task_alt';
-  }
-
-  getTaskIcon(task: UnscheduledTask): string {
+  getTaskIcon(task: PlannedTask): string {
     const t = task.title.toLowerCase();
     if (t.includes('study') || t.includes('interview') || t.includes('learn')) return 'menu_book';
     if (t.includes('workout') || t.includes('fitness') || t.includes('run')) return 'fitness_center';
@@ -481,7 +488,7 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
   }
 
   // ── Desktop HTML5 drag ──────────────────────────────────────────────
-  onDragStart(event: DragEvent, task: UnscheduledTask): void {
+  onDragStart(event: DragEvent, task: PlannedTask): void {
     this.draggingTask.set(task);
     if (event.dataTransfer) {
       event.dataTransfer.setData('taskId', task.id);
@@ -516,7 +523,7 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
   }
 
   // ── Mobile touch drag ───────────────────────────────────────────────
-  onTouchStart(event: TouchEvent, task: UnscheduledTask): void {
+  onTouchStart(event: TouchEvent, task: PlannedTask): void {
     this.draggingTask.set(task);
 
     const src = event.currentTarget as HTMLElement;
@@ -592,32 +599,22 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
   }
 
   // ── Shared schedule logic ────────────────────────────────────────────
-  private scheduleAt(task: UnscheduledTask, hour: number): void {
-    const remaining = task.remainingMinutes;
-    if (remaining <= 0) return;
-
+  private scheduleAt(task: PlannedTask, hour: number): void {
     const start = `${hour.toString().padStart(2, '0')}:00`;
-    const end = this.addMinutesToTime(start, remaining);
-    this.scheduleService.addEvent({
-      id: `task-${task.id}-${Date.now()}`,
-      title: task.title,
-      type: 'task',
-      date: this.dateStr,
-      startTime: start,
-      endTime: end,
-      color: '#451de3',
-      sourceTaskId: task.id,
-    });
-    this.scheduleService.scheduleTask(task.id, remaining);
+    // Default duration: minTimeMinutes if set, otherwise 15 min (count-only or unconstrained tasks).
+    const minutes = task.minTimeMinutes ?? 15;
+    const end = this.addMinutesToTime(start, minutes);
+    this.plannedTasks.update(task.id, { startTime: start, endTime: end, needsTimeSlot: true })
+      .subscribe(() => this.reload());
   }
 
   // ── Resize handle (bottom edge of event) ────────────────────────────
-  onResizeStart(event: MouseEvent | TouchEvent, evt: ScheduledEvent): void {
+  onResizeStart(event: MouseEvent | TouchEvent, evt: PlannedTask): void {
     event.stopPropagation();
     event.preventDefault();
     this.resizeEvent = evt;
     this.resizeStartY = this.eventY(event);
-    this.resizeStartHeight = this.getEventHeight(evt.startTime, evt.endTime);
+    this.resizeStartHeight = this.getEventHeight(evt.startTime!, evt.endTime!);
     this.resizingEventId.set(evt.id);
     this.resizingHeight.set(this.resizeStartHeight);
     this.doc.addEventListener('mousemove', this.boundResizeMove as EventListener);
@@ -641,9 +638,13 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
     this.doc.removeEventListener('touchend', this.boundResizeEnd as EventListener);
 
     this.zone.run(() => {
-      if (this.resizeEvent) {
+      if (this.resizeEvent && this.resizeEvent.startTime) {
         const minutes = this.pixelsToMinutes(this.resizingHeight());
-        if (minutes > 0) this.scheduleService.resizeEvent(this.resizeEvent.id, minutes);
+        if (minutes > 0) {
+          const newEnd = this.addMinutesToTime(this.resizeEvent.startTime, minutes);
+          this.plannedTasks.update(this.resizeEvent.id, { endTime: newEnd })
+            .subscribe(() => this.reload());
+        }
       }
       this.resizingEventId.set(null);
       this.resizingHeight.set(0);
@@ -652,7 +653,7 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
   }
 
   // ── Pointer interaction: click → edit, drag → move ──────────────────
-  onEventDown(event: MouseEvent | TouchEvent, evt: ScheduledEvent): void {
+  onEventDown(event: MouseEvent | TouchEvent, evt: PlannedTask): void {
     if ((event.target as HTMLElement).closest('[data-resize-handle]')) return;
     if (this.moveDrag) this.cancelMoveDrag();
 
@@ -726,11 +727,12 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
 
     this.zone.run(() => {
       if (drag.isDragging) {
-        if (drag.hoverHour !== null) {
+        if (drag.hoverHour !== null && drag.evt.startTime && drag.evt.endTime) {
           const duration = this.diffMinutes(drag.evt.startTime, drag.evt.endTime);
           const newStart = `${drag.hoverHour.toString().padStart(2, '0')}:00`;
           const newEnd = this.addMinutesToTime(newStart, duration);
-          this.scheduleService.updateEvent(drag.evt.id, { startTime: newStart, endTime: newEnd });
+          this.plannedTasks.update(drag.evt.id, { startTime: newStart, endTime: newEnd })
+            .subscribe(() => this.reload());
         }
       } else {
         this.openEditModal(drag.evt);
@@ -755,7 +757,7 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
     this.moveDrag = null;
   }
 
-  private createMoveGhost(evt: ScheduledEvent): void {
+  private createMoveGhost(evt: PlannedTask): void {
     if (!this.moveDrag) return;
     const source = this.doc.querySelector(`[data-event-id="${evt.id}"]`) as HTMLElement | null;
     if (!source) return;
@@ -779,11 +781,10 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
     this.moveDrag.ghost = clone;
   }
 
-  openEditModal(evt: ScheduledEvent): void {
+  openEditModal(evt: PlannedTask): void {
     this.editingEvent.set(evt);
-    this.editDate = evt.date;
-    this.editStart = evt.startTime;
-    this.editEnd = evt.endTime;
+    this.editStart = evt.startTime || '';
+    this.editEnd = evt.endTime || '';
   }
 
   closeEditModal(): void {
@@ -794,13 +795,41 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
     const evt = this.editingEvent();
     if (!evt) return;
     if (this.diffMinutes(this.editStart, this.editEnd) <= 0) return;
-    if (!this.editDate) return;
-    this.scheduleService.updateEvent(evt.id, {
-      date: this.editDate,
+    this.plannedTasks.update(evt.id, {
       startTime: this.editStart,
       endTime: this.editEnd,
-    });
+    }).subscribe(() => this.reload());
     this.editingEvent.set(null);
+  }
+
+  // ── Skip popup handlers ──────────────────────────────────────────────
+  onPopupYes(): void {
+    this.popupVisible.set(false);
+    if (this.popupOnYes) this.popupOnYes();
+    this.popupOnYes = null;
+    this.popupOnNo = null;
+  }
+
+  onPopupNo(): void {
+    this.popupVisible.set(false);
+    if (this.popupOnNo) this.popupOnNo();
+    this.popupOnYes = null;
+    this.popupOnNo = null;
+  }
+
+  private openPopup(
+    title: string,
+    yesLabel: string,
+    noLabel: string,
+    onYes: () => void,
+    onNo: () => void,
+  ): void {
+    this.popupTitle.set(title);
+    this.popupYesLabel.set(yesLabel);
+    this.popupNoLabel.set(noLabel);
+    this.popupOnYes = onYes;
+    this.popupOnNo = onNo;
+    this.popupVisible.set(true);
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────
@@ -809,7 +838,7 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
   }
 
   private eventY(e: MouseEvent | TouchEvent): number {
-    return 'touches' in e ? e.touches[0]?.clientY ?? e.changedTouches[0]?.clientY ?? 0 : e.clientY;
+    return 'touches' in e ? e.touches[0]?.clientY ?? (e as TouchEvent).changedTouches[0]?.clientY ?? 0 : (e as MouseEvent).clientY;
   }
 
   private pixelsToMinutes(px: number): number {
@@ -826,6 +855,7 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
   }
 
   private diffMinutes(start: string, end: string): number {
+    if (!start || !end) return 0;
     const [sh, sm] = start.split(':').map(Number);
     const [eh, em] = end.split(':').map(Number);
     return eh * 60 + em - (sh * 60 + sm);

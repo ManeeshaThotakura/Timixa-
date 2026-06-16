@@ -7,6 +7,9 @@
   ],
   "scripts": {
     "frontend": "npm run start --workspace=apps/frontend",
-    "backend": "npm run dev --workspace=apps/backend"
+    "backend": "npm run dev --workspace=apps/backend",
+    "backend-java": "cd apps/backend-java && ./mvnw spring-boot:run",
+    "e2e": "npm run test --workspace=apps/e2e",
+    "e2e:install": "npm run install-browsers --workspace=apps/e2e"
   }
 }

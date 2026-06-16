@@ -2,16 +2,22 @@ import { Component, OnInit, OnDestroy, inject, signal, computed, NgZone, ViewChi
 import { CommonModule, DOCUMENT } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
-import { ScheduleService } from '../../../core/services/schedule.service';
-import { ScheduledEvent, UnscheduledTask } from '../../../core/models/schedule.model';
+import { PlannedTaskService } from '../../../core/services/planned-task.service';
+import { PlannedTask, Weekday } from '../../../core/models/planned-task.model';
+import { ExceptionPopupComponent } from '../exception-popup.component';
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i); // 00:00 – 23:00
 const DAY_ABBR = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
 
+// Map JS day-of-week (0=Sun) to Weekday enum value
+const JS_DAY_TO_WEEKDAY: Weekday[] = [
+  'SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY',
+];
+
 @Component({
   selector: 'app-schedule-week',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, ExceptionPopupComponent],
   template: `
     <!-- Segmented Control -->
     <div class="px-margin-page mt-stack-md">
@@ -87,7 +93,7 @@ const DAY_ABBR = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
               <div class="w-2 h-2 rounded-full bg-error animate-pulse"></div>
             </div>
             <p class="font-semibold text-[13px] text-on-surface mb-1 truncate">{{ task.title }}</p>
-            <p class="text-[10px] text-on-surface-variant">Due {{ task.dueDate | date:'MMM d' }}</p>
+            <p class="text-[10px] text-on-surface-variant">{{ task.cadence }}</p>
           </div>
         </div>
       </div>
@@ -186,21 +192,21 @@ const DAY_ABBR = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
                    : '0 1px 4px rgba(0,0,0,0.06)'"
                  [ngStyle]="getCellEventStyle(evt, day.dateStr)"
                  [style.opacity]="movingEventId() === evt.id ? '0.35' : '1'"
-                 [style.background]="getEventBg(evt.type)"
-                 [style.borderLeftColor]="getEventBorder(evt.type, evt.color)"
+                 [style.background]="getEventBg()"
+                 [style.borderLeftColor]="getEventBorder(evt.color)"
                  (mousedown)="onEventDown($event, evt)"
                  (touchstart)="onEventDown($event, evt)">
               <span class="material-symbols-outlined text-[13px] opacity-70 flex-shrink-0 -ml-1 relative z-10 leading-none pointer-events-none"
-                    [style.color]="getEventBorder(evt.type, evt.color)">
+                    [style.color]="getEventBorder(evt.color)">
                 drag_indicator
               </span>
               <span class="text-[10px] font-bold truncate flex-1 leading-tight pointer-events-none"
-                    [style.color]="getEventBorder(evt.type, evt.color)">
+                    [style.color]="getEventBorder(evt.color)">
                 {{ evt.title }}
               </span>
               <span class="text-[9px] font-medium flex-shrink-0 leading-tight whitespace-nowrap pointer-events-none"
-                    [style.color]="getEventBorder(evt.type, evt.color)">
-                {{ resizingEventId() === evt.id ? resizingTimeLabel() : evt.startTime + '–' + evt.endTime }}
+                    [style.color]="getEventBorder(evt.color)">
+                {{ resizingEventId() === evt.id ? resizingTimeLabel() : (evt.startTime || '') + '–' + (evt.endTime || '') }}
               </span>
               <!-- Resize handle (off the left edge so it never overlaps the drag indicator) -->
               <div class="absolute bottom-0 left-8 right-1 h-3 flex items-center justify-center cursor-ns-resize hover:bg-primary/10 transition-colors"
@@ -291,11 +297,21 @@ const DAY_ABBR = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
         </div>
       </div>
     </div>
+
+    <!-- Exception/cross-day popup -->
+    <app-exception-popup
+      *ngIf="popupVisible()"
+      [title]="popupTitle()"
+      [yesLabel]="popupYesLabel()"
+      [noLabel]="popupNoLabel()"
+      (yes)="onPopupYes()"
+      (no)="onPopupNo()">
+    </app-exception-popup>
   `,
 })
 export class ScheduleWeekComponent implements OnInit, OnDestroy {
   router = inject(Router);
-  private scheduleService = inject(ScheduleService);
+  private plannedTasks = inject(PlannedTaskService);
   private zone = inject(NgZone);
   private doc = inject(DOCUMENT);
 
@@ -327,10 +343,22 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
     { label: 'Month', route: '/schedule/month' },
   ];
 
-  unscheduledTasks = computed(() =>
-    this.scheduleService.unscheduledTasks().filter(t => t.remainingMinutes > 0),
-  );
-  draggingTask  = signal<UnscheduledTask | null>(null);
+  // Signal holding PlannedTask[] per date for the current week
+  tasksByDay = signal<Map<string, PlannedTask[]>>(new Map());
+
+  unscheduledTasks = computed(() => {
+    const all: PlannedTask[] = [];
+    this.tasksByDay().forEach(list => {
+      for (const t of list) {
+        if (t.needsTimeSlot && !t.startTime && !all.some(x => x.id === t.id)) {
+          all.push(t);
+        }
+      }
+    });
+    return all;
+  });
+
+  draggingTask  = signal<PlannedTask | null>(null);
   dragOverHour  = signal<number | null>(null);
   dragOverDate  = signal<string | null>(null);
 
@@ -343,7 +371,8 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
 
   // Pointer-drag (click-or-move) state
   private moveDrag: {
-    evt: ScheduledEvent;
+    evt: PlannedTask;
+    fromDate: string;
     startX: number; startY: number;
     isDragging: boolean;
     hoverHour: number | null;
@@ -360,12 +389,12 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
   resizingHeight = signal<number>(0);
   private resizeStartY = 0;
   private resizeStartHeight = 0;
-  private resizeEvent: ScheduledEvent | null = null;
+  private resizeEvent: PlannedTask | null = null;
   private readonly boundResizeMove = (e: MouseEvent | TouchEvent) => this.onResizeMove(e);
   private readonly boundResizeEnd = (e: MouseEvent | TouchEvent) => this.onResizeEnd(e);
 
   resizingTimeLabel = computed(() => {
-    if (!this.resizeEvent) return '';
+    if (!this.resizeEvent || !this.resizeEvent.startTime) return '';
     const minutes = this.pixelsToMinutes(this.resizingHeight());
     const end = this.addMinutesToTime(this.resizeEvent.startTime, minutes);
     return `${this.resizeEvent.startTime}–${end}`;
@@ -381,10 +410,18 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
   private readonly wheelBlocker = (e: Event) => e.preventDefault();
 
   // Edit modal state
-  editingEvent = signal<ScheduledEvent | null>(null);
+  editingEvent = signal<PlannedTask | null>(null);
   editDate = '';
   editStart = '';
   editEnd = '';
+
+  // Exception popup state
+  popupVisible = signal(false);
+  popupTitle = signal('');
+  popupYesLabel = signal('Yes, every week');
+  popupNoLabel = signal('No, just this date');
+  private popupOnYes: (() => void) | null = null;
+  private popupOnNo: (() => void) | null = null;
 
   get weekDays() {
     return Array.from({ length: 7 }, (_, i) => {
@@ -407,16 +444,47 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
   }
 
   get weekEventsCount(): number {
-    return this.weekDays.reduce((sum, d) =>
-      sum + this.scheduleService.getByDate(d.dateStr).length, 0);
+    let n = 0;
+    this.tasksByDay().forEach(list => {
+      n += list.filter(t => !!t.startTime && !!t.endTime).length;
+    });
+    return n;
   }
 
   get weekVelocity(): number {
-    const total = this.weekEventsCount + this.unscheduledTasks().length;
-    return total === 0 ? 0 : Math.round((this.weekEventsCount / total) * 100);
+    const scheduled = this.weekEventsCount;
+    const unscheduled = this.unscheduledTasks().length;
+    const total = scheduled + unscheduled;
+    return total === 0 ? 0 : Math.round((scheduled / total) * 100);
   }
 
-  ngOnInit(): void { this.scheduleService.load(); }
+  // Computed buckets for the grid — split by (dateStr, hour) key
+  private allEventsByCell = computed(() => {
+    const byCell = new Map<string, PlannedTask[]>();
+    this.tasksByDay().forEach((list, dateStr) => {
+      for (const t of list) {
+        if (!t.startTime) continue;
+        const hour = parseInt(t.startTime.split(':')[0], 10);
+        const key = `${dateStr}#${hour}`;
+        let bucket = byCell.get(key);
+        if (!bucket) { bucket = []; byCell.set(key, bucket); }
+        bucket.push(t);
+      }
+    });
+    return byCell;
+  });
+
+  private allLayouts = computed(() => {
+    const layouts = new Map<string, Map<string, { col: number; count: number }>>();
+    this.tasksByDay().forEach((list, dateStr) => {
+      const scheduled = list.filter(t => !!t.startTime && !!t.endTime);
+      layouts.set(dateStr, this.computeLayout(scheduled));
+    });
+    return layouts;
+  });
+
+  ngOnInit(): void { this.reload(); }
+
   ngOnDestroy(): void {
     this.cleanupTouch();
     this.cancelMoveDrag();
@@ -429,6 +497,14 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
     this.doc.removeEventListener('touchcancel', this.boundResizeEnd as EventListener);
   }
 
+  private weekStartIso(): string {
+    return this.weekStart.toISOString().split('T')[0];
+  }
+
+  private reload(): void {
+    this.plannedTasks.loadForWeek(this.weekStartIso()).subscribe(map => this.tasksByDay.set(map));
+  }
+
   isToday(date: Date): boolean {
     return date.toDateString() === new Date().toDateString();
   }
@@ -437,40 +513,11 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
     return `${h.toString().padStart(2, '0')}:00`;
   }
 
-  // Cached buckets — recompute only when events signal changes, not every CD cycle.
-  private allEventsByCell = computed(() => {
-    const events = this.scheduleService.events();
-    const byCell = new Map<string, ScheduledEvent[]>();
-    for (const evt of events) {
-      const hour = parseInt(evt.startTime.split(':')[0], 10);
-      const key = `${evt.date}#${hour}`;
-      let bucket = byCell.get(key);
-      if (!bucket) { bucket = []; byCell.set(key, bucket); }
-      bucket.push(evt);
-    }
-    return byCell;
-  });
-
-  private allLayouts = computed(() => {
-    const events = this.scheduleService.events();
-    const byDate = new Map<string, ScheduledEvent[]>();
-    for (const evt of events) {
-      let bucket = byDate.get(evt.date);
-      if (!bucket) { bucket = []; byDate.set(evt.date, bucket); }
-      bucket.push(evt);
-    }
-    const layouts = new Map<string, Map<string, { col: number; count: number }>>();
-    for (const [date, dayEvents] of byDate) {
-      layouts.set(date, this.computeLayout(dayEvents));
-    }
-    return layouts;
-  });
-
-  getEventsForCell(hour: number, dateStr: string): ScheduledEvent[] {
+  getEventsForCell(hour: number, dateStr: string): PlannedTask[] {
     return this.allEventsByCell().get(`${dateStr}#${hour}`) ?? [];
   }
 
-  trackByEventId(_i: number, evt: ScheduledEvent): string { return evt.id; }
+  trackByEventId(_i: number, evt: PlannedTask): string { return evt.id; }
   trackByDateStr(_i: number, day: { dateStr: string }): string { return day.dateStr; }
   trackByHour(_i: number, hour: number): number { return hour; }
 
@@ -485,32 +532,32 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
     return h * 60 + m;
   }
 
-  private computeLayout(events: ScheduledEvent[]): Map<string, { col: number; count: number }> {
+  private computeLayout(events: PlannedTask[]): Map<string, { col: number; count: number }> {
     const result = new Map<string, { col: number; count: number }>();
     if (events.length === 0) return result;
-    const sorted = [...events].sort((a, b) => this.toMin(a.startTime) - this.toMin(b.startTime));
-    let cluster: ScheduledEvent[] = [];
+    const sorted = [...events].sort((a, b) => this.toMin(a.startTime!) - this.toMin(b.startTime!));
+    let cluster: PlannedTask[] = [];
     let clusterEnd = -1;
     const flush = () => {
       if (!cluster.length) return;
       const cols: number[] = [];
       const assigns: number[] = [];
       for (const evt of cluster) {
-        const start = this.toMin(evt.startTime);
+        const start = this.toMin(evt.startTime!);
         let assigned = -1;
         for (let i = 0; i < cols.length; i++) {
           if (cols[i] <= start) { assigned = i; break; }
         }
         if (assigned === -1) { assigned = cols.length; cols.push(0); }
-        cols[assigned] = this.toMin(evt.endTime);
+        cols[assigned] = this.toMin(evt.endTime!);
         assigns.push(assigned);
       }
       const count = cols.length;
       cluster.forEach((evt, i) => result.set(evt.id, { col: assigns[i], count }));
     };
     for (const evt of sorted) {
-      const s = this.toMin(evt.startTime);
-      const e = this.toMin(evt.endTime);
+      const s = this.toMin(evt.startTime!);
+      const e = this.toMin(evt.endTime!);
       if (s < clusterEnd) {
         cluster.push(evt);
         clusterEnd = Math.max(clusterEnd, e);
@@ -536,11 +583,11 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
     return n;
   }
 
-  getCellEventStyle(evt: ScheduledEvent, dateStr: string): Record<string, string> {
+  getCellEventStyle(evt: PlannedTask, dateStr: string): Record<string, string> {
     const isResizing = this.resizingEventId() === evt.id;
     const height = isResizing
       ? this.resizingHeight()
-      : this.getCellEventHeight(evt.startTime, evt.endTime);
+      : this.getCellEventHeight(evt.startTime!, evt.endTime!);
     const layout = this.getDayLayout(dateStr).get(evt.id);
     const style: Record<string, string> = {
       top: '4px',
@@ -559,19 +606,16 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
     return style;
   }
 
-  getEventBg(type: string): string {
-    if (type === 'habit') return 'rgba(194,232,255,0.45)';
-    if (type === 'meeting') return 'rgba(232,245,233,0.9)';
+  // All planned tasks are "task" type — use task styling for all
+  getEventBg(): string {
     return 'rgba(228,223,255,0.45)';
   }
 
-  getEventBorder(type: string, color: string): string {
-    if (type === 'habit') return '#006688';
-    if (type === 'meeting') return '#2E7D32';
+  getEventBorder(color: string): string {
     return color || '#451de3';
   }
 
-  getTaskIcon(task: UnscheduledTask): string {
+  getTaskIcon(task: PlannedTask): string {
     const t = task.title.toLowerCase();
     if (t.includes('study') || t.includes('interview') || t.includes('learn')) return 'menu_book';
     if (t.includes('workout') || t.includes('fitness') || t.includes('run')) return 'fitness_center';
@@ -585,16 +629,18 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
     const d = new Date(this.weekStart);
     d.setDate(d.getDate() - 7);
     this.weekStart = d;
+    this.reload();
   }
 
   nextWeek(): void {
     const d = new Date(this.weekStart);
     d.setDate(d.getDate() + 7);
     this.weekStart = d;
+    this.reload();
   }
 
   // ── Desktop drag ─────────────────────────────────────────────────────
-  onDragStart(event: DragEvent, task: UnscheduledTask): void {
+  onDragStart(event: DragEvent, task: PlannedTask): void {
     this.draggingTask.set(task);
     if (event.dataTransfer) {
       event.dataTransfer.setData('taskId', task.id);
@@ -633,7 +679,7 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
   }
 
   // ── Touch drag ───────────────────────────────────────────────────────
-  onTouchStart(event: TouchEvent, task: UnscheduledTask): void {
+  onTouchStart(event: TouchEvent, task: PlannedTask): void {
     this.draggingTask.set(task);
     const src  = event.currentTarget as HTMLElement;
     const rect = src.getBoundingClientRect();
@@ -704,31 +750,47 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
     this.doc.removeEventListener('touchend',  this.boundTouchEnd);
   }
 
-  private scheduleAt(task: UnscheduledTask, hour: number, dateStr: string): void {
-    const remaining = task.remainingMinutes;
-    if (remaining <= 0) return;
-
+  private scheduleAt(task: PlannedTask, hour: number, dateStr: string): void {
     const start = `${hour.toString().padStart(2, '0')}:00`;
-    const total = hour * 60 + remaining;
+    // Default duration: minTimeMinutes if set, otherwise 15 min (count-only or unconstrained tasks).
+    const minutes = task.minTimeMinutes ?? 15;
+    const total = hour * 60 + minutes;
     const eh = Math.min(23, Math.floor(total / 60));
     const em = total % 60;
     const end = `${eh.toString().padStart(2, '0')}:${em.toString().padStart(2, '0')}`;
 
-    this.scheduleService.addEvent({
-      id: `task-${task.id}-${Date.now()}`,
-      title: task.title,
-      type: 'task',
-      date: dateStr,
-      startTime: start,
-      endTime: end,
-      color: '#451de3',
-      sourceTaskId: task.id,
-    });
-    this.scheduleService.scheduleTask(task.id, remaining);
+    this.plannedTasks.update(task.id, { startTime: start, endTime: end, needsTimeSlot: true })
+      .subscribe(() => {
+        // Check if dropped date is covered by the cadence
+        const droppedDate = new Date(dateStr + 'T00:00:00');
+        const droppedWeekday = JS_DAY_TO_WEEKDAY[droppedDate.getDay()];
+        const existingWeekdays = task.weekdays ?? [];
+        const isCovered = task.cadence !== 'WEEKLY' || existingWeekdays.includes(droppedWeekday);
+
+        if (!isCovered && task.cadence === 'WEEKLY') {
+          this.plannedTasks.addException(task.id, dateStr, 'ADD').subscribe(() => {
+            this.reload();
+            this.openPopup(
+              `Add ${droppedWeekday} to every week's ${task.title}?`,
+              'Yes, every week',
+              'No, just this date',
+              () => {
+                this.plannedTasks.applyPermanently(task.id, dateStr, {
+                  weekdays: [...existingWeekdays, droppedWeekday],
+                }).subscribe(() => this.reload());
+              },
+              () => this.reload(),
+            );
+          });
+        } else {
+          this.reload();
+        }
+      });
   }
 
   // ── Pointer interaction: select → edit/move ─────────────────────────
-  onEventDown(event: MouseEvent | TouchEvent, evt: ScheduledEvent): void {
+  onEventDown(event: MouseEvent | TouchEvent, evt: PlannedTask): void {
+    if ((event.target as HTMLElement).closest('[data-resize-handle]')) return;
     if (this.moveDrag) this.cancelMoveDrag();
 
     event.stopPropagation();
@@ -740,8 +802,14 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
       return;
     }
 
+    // Determine which column (date) this event is displayed in
+    const el = event.target as HTMLElement;
+    const cellEl = el.closest('[data-date]');
+    const fromDate = cellEl?.getAttribute('data-date') ?? '';
+
     this.moveDrag = {
       evt,
+      fromDate,
       startX: this.eventX(event),
       startY: this.eventY(event),
       isDragging: false,
@@ -825,18 +893,50 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
 
     this.zone.run(() => {
       if (drag.isDragging) {
-        if (drag.hoverHour !== null && drag.hoverDate) {
+        if (drag.hoverHour !== null && drag.hoverDate && drag.evt.startTime && drag.evt.endTime) {
           const duration = this.diffMinutes(drag.evt.startTime, drag.evt.endTime);
           const newStart = `${drag.hoverHour.toString().padStart(2, '0')}:00`;
           const newEnd = this.addMinutesToTime(newStart, duration);
-          this.scheduleService.updateEvent(drag.evt.id, {
-            date: drag.hoverDate,
-            startTime: newStart,
-            endTime: newEnd,
-          });
+          const fromDate = drag.fromDate;
+          const toDate = drag.hoverDate;
+
+          if (fromDate && toDate && fromDate !== toDate) {
+            // Cross-day move: use exception flow
+            const task = drag.evt;
+            const fromDateObj = new Date(fromDate + 'T00:00:00');
+            const toDateObj = new Date(toDate + 'T00:00:00');
+            const fromWeekday = JS_DAY_TO_WEEKDAY[fromDateObj.getDay()];
+            const toWeekday = JS_DAY_TO_WEEKDAY[toDateObj.getDay()];
+
+            this.plannedTasks.addException(task.id, fromDate, 'SKIP').subscribe(() => {
+              this.plannedTasks.addException(task.id, toDate, 'ADD').subscribe(() => {
+                this.reload();
+                this.openPopup(
+                  `Move ${task.title} from ${fromWeekday} to ${toWeekday} every week?`,
+                  'Yes, every week',
+                  'No, just this date',
+                  () => {
+                    const existingWeekdays = task.weekdays ?? [];
+                    const newWeekdays = existingWeekdays
+                      .filter(d => d !== fromWeekday)
+                      .concat(toWeekday);
+                    this.plannedTasks.removeException(task.id, toDate).subscribe(() => {
+                      this.plannedTasks.applyPermanently(task.id, fromDate, { weekdays: newWeekdays })
+                        .subscribe(() => this.reload());
+                    });
+                  },
+                  () => this.reload(),
+                );
+              });
+            });
+          } else {
+            // Same-day move: simple update
+            this.plannedTasks.update(drag.evt.id, { startTime: newStart, endTime: newEnd })
+              .subscribe(() => this.reload());
+          }
         }
       } else {
-        this.openEditModal(drag.evt);
+        this.openEditModal(drag.evt, drag.fromDate);
       }
       this.movingEventId.set(null);
       this.dragOverHour.set(null);
@@ -950,7 +1050,7 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
     this.moveDrag = null;
   }
 
-  private createMoveGhost(evt: ScheduledEvent): void {
+  private createMoveGhost(evt: PlannedTask): void {
     if (!this.moveDrag) return;
     const source = this.doc.querySelector(`[data-event-id="${evt.id}"]`) as HTMLElement | null;
     if (!source) return;
@@ -975,7 +1075,7 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
   }
 
   // ── Resize ──────────────────────────────────────────────────────────
-  onResizeStart(event: MouseEvent | TouchEvent, evt: ScheduledEvent): void {
+  onResizeStart(event: MouseEvent | TouchEvent, evt: PlannedTask): void {
     event.stopPropagation();
     event.preventDefault();
 
@@ -984,6 +1084,8 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
       this.zone.run(() => this.selectedEventId.set(evt.id));
       return;
     }
+
+    if (!evt.startTime || !evt.endTime) return;
 
     this.resizeEvent = evt;
     this.resizeStartY = this.eventY(event);
@@ -1017,9 +1119,13 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
     this.unlockGrid();
 
     this.zone.run(() => {
-      if (this.resizeEvent) {
+      if (this.resizeEvent && this.resizeEvent.startTime) {
         const minutes = this.pixelsToMinutes(this.resizingHeight());
-        if (minutes > 0) this.scheduleService.resizeEvent(this.resizeEvent.id, minutes);
+        if (minutes > 0) {
+          const newEnd = this.addMinutesToTime(this.resizeEvent.startTime, minutes);
+          this.plannedTasks.update(this.resizeEvent.id, { endTime: newEnd })
+            .subscribe(() => this.reload());
+        }
       }
       this.resizingEventId.set(null);
       this.resizingHeight.set(0);
@@ -1033,6 +1139,7 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
   }
 
   private diffMinutes(start: string, end: string): number {
+    if (!start || !end) return 0;
     const [sh, sm] = start.split(':').map(Number);
     const [eh, em] = end.split(':').map(Number);
     return eh * 60 + em - (sh * 60 + sm);
@@ -1046,11 +1153,11 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
     return `${nh.toString().padStart(2, '0')}:${nm.toString().padStart(2, '0')}`;
   }
 
-  openEditModal(evt: ScheduledEvent): void {
+  openEditModal(evt: PlannedTask, dateStr?: string): void {
     this.editingEvent.set(evt);
-    this.editDate = evt.date;
-    this.editStart = evt.startTime;
-    this.editEnd = evt.endTime;
+    this.editDate = dateStr ?? (evt.scheduledDate ?? '');
+    this.editStart = evt.startTime ?? '';
+    this.editEnd = evt.endTime ?? '';
   }
 
   closeEditModal(): void {
@@ -1063,13 +1170,41 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
     const [sh, sm] = this.editStart.split(':').map(Number);
     const [eh, em] = this.editEnd.split(':').map(Number);
     if ((eh * 60 + em) - (sh * 60 + sm) <= 0) return;
-    if (!this.editDate) return;
-    this.scheduleService.updateEvent(evt.id, {
-      date: this.editDate,
+    this.plannedTasks.update(evt.id, {
       startTime: this.editStart,
       endTime: this.editEnd,
-    });
+    }).subscribe(() => this.reload());
     this.editingEvent.set(null);
+  }
+
+  // ── Exception popup handlers ─────────────────────────────────────────
+  onPopupYes(): void {
+    this.popupVisible.set(false);
+    if (this.popupOnYes) this.popupOnYes();
+    this.popupOnYes = null;
+    this.popupOnNo = null;
+  }
+
+  onPopupNo(): void {
+    this.popupVisible.set(false);
+    if (this.popupOnNo) this.popupOnNo();
+    this.popupOnYes = null;
+    this.popupOnNo = null;
+  }
+
+  private openPopup(
+    title: string,
+    yesLabel: string,
+    noLabel: string,
+    onYes: () => void,
+    onNo: () => void,
+  ): void {
+    this.popupTitle.set(title);
+    this.popupYesLabel.set(yesLabel);
+    this.popupNoLabel.set(noLabel);
+    this.popupOnYes = onYes;
+    this.popupOnNo = onNo;
+    this.popupVisible.set(true);
   }
 
   private eventX(e: MouseEvent | TouchEvent): number {
@@ -1077,7 +1212,7 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
   }
 
   private eventY(e: MouseEvent | TouchEvent): number {
-    return 'touches' in e ? e.touches[0]?.clientY ?? e.changedTouches[0]?.clientY ?? 0 : e.clientY;
+    return 'touches' in e ? e.touches[0]?.clientY ?? (e as TouchEvent).changedTouches[0]?.clientY ?? 0 : (e as MouseEvent).clientY;
   }
 
   private getMonday(date: Date): Date {

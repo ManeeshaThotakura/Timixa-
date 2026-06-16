@@ -1,82 +1,67 @@
 import { Injectable, signal, computed, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
+import { firstValueFrom, Observable, map, tap } from 'rxjs';
 import { User } from '../models/user.model';
 import { environment } from '../../../environments/environment';
 
-interface AuthResponse {
-  token: string;
-  user: User;
-}
+interface AuthResponse { token: string; user: User; }
+
+export interface RegisterPayload { name: string; email: string; password: string; }
+export interface LoginPayload    { email: string; password: string; }
+export interface OnboardingPayload { age: number; occupation: string; bedtime: string; wakeTime: string; }
+
+const TOKEN_KEY = 'timixa_token';
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private http = inject(HttpClient);
   private router = inject(Router);
   private api = `${environment.apiUrl}/auth`;
+  private userApi = `${environment.apiUrl}/users`;
 
-  private _currentUser = signal<User | null>(this.loadFromStorage());
-  private _error = signal<string | null>(null);
-  private _busy = signal<boolean>(false);
-
+  private _currentUser = signal<User | null>(null);
   readonly currentUser = this._currentUser.asReadonly();
-  readonly error = this._error.asReadonly();
-  readonly busy = this._busy.asReadonly();
   readonly isLoggedIn = computed(() => this._currentUser() !== null);
 
-  private loadFromStorage(): User | null {
-    const stored = localStorage.getItem('timixa_user');
-    return stored ? JSON.parse(stored) : null;
+  async bootstrap(): Promise<void> {
+    if (!localStorage.getItem(TOKEN_KEY)) return;
+    try {
+      const user = await firstValueFrom(this.http.get<User>(`${this.api}/me`));
+      this._currentUser.set(user);
+    } catch {
+      localStorage.removeItem(TOKEN_KEY);
+      this._currentUser.set(null);
+    }
   }
 
-  private persist(token: string, user: User): void {
-    localStorage.setItem('timixa_token', token);
-    localStorage.setItem('timixa_user', JSON.stringify(user));
-    this._currentUser.set(user);
+  register(payload: RegisterPayload): Observable<User> {
+    return this.http.post<AuthResponse>(`${this.api}/register`, payload).pipe(
+      tap(({ token, user }) => { localStorage.setItem(TOKEN_KEY, token); this._currentUser.set(user); }),
+      map(({ user }) => user),
+    );
   }
 
-  login(email: string, password: string): void {
-    this._error.set(null);
-    this._busy.set(true);
-    this.http.post<AuthResponse>(`${this.api}/login`, { email, password }).subscribe({
-      next: ({ token, user }) => {
-        this.persist(token, user);
-        this._busy.set(false);
-        this.router.navigate(['/dashboard']);
-      },
-      error: err => {
-        this._busy.set(false);
-        this._error.set(err.error?.error || 'Login failed');
-      },
-    });
+  login(payload: LoginPayload): Observable<User> {
+    return this.http.post<AuthResponse>(`${this.api}/login`, payload).pipe(
+      tap(({ token, user }) => { localStorage.setItem(TOKEN_KEY, token); this._currentUser.set(user); }),
+      map(({ user }) => user),
+    );
   }
 
-  register(name: string, email: string, password: string): void {
-    this._error.set(null);
-    this._busy.set(true);
-    this.http
-      .post<AuthResponse>(`${this.api}/register`, { name, email, password })
-      .subscribe({
-        next: ({ token, user }) => {
-          this.persist(token, user);
-          this._busy.set(false);
-          this.router.navigate(['/dashboard']);
-        },
-        error: err => {
-          this._busy.set(false);
-          this._error.set(err.error?.error || 'Registration failed');
-        },
-      });
+  completeOnboarding(payload: OnboardingPayload): Observable<User> {
+    return this.http
+      .patch<User>(`${this.userApi}/me/onboarding`, payload)
+      .pipe(tap(user => this._currentUser.set(user)));
   }
 
   logout(): void {
-    localStorage.removeItem('timixa_user');
-    localStorage.removeItem('timixa_token');
+    localStorage.removeItem(TOKEN_KEY);
     this._currentUser.set(null);
     this.router.navigate(['/auth/login']);
   }
 
   hasToken(): boolean {
-    return !!localStorage.getItem('timixa_token');
+    return !!localStorage.getItem(TOKEN_KEY);
   }
 }
