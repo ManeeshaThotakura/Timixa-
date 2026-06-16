@@ -390,6 +390,9 @@ export class NewTaskComponent {
   scheduleSummary(): string {
     const c = this.scheduleConfig();
     if (!c) return '';
+    if (c.frequency === 'never') {
+      return c.startDate ? `One-time on ${c.startDate}` : 'One-time task';
+    }
     const unit = c.frequency === 'daily'   ? 'day'
                : c.frequency === 'weekly'  ? 'week'
                : c.frequency === 'monthly' ? 'month'
@@ -458,8 +461,14 @@ export class NewTaskComponent {
     let cadence: PlannedTaskCadence;
     let weekdays: Weekday[] | undefined;
     let monthDays: number[] | undefined;
+    let scheduledDate: string | undefined;
 
     switch (cfg.frequency) {
+      case 'never':
+        cadence = 'ONCE';
+        // One-time task: use the picker's Start Date or today.
+        scheduledDate = cfg.startDate || new Date().toISOString().slice(0, 10);
+        break;
       case 'weekly':
         cadence = 'WEEKLY';
         weekdays = this.mapWeeklyDays(cfg.weeklyDays);
@@ -495,6 +504,7 @@ export class NewTaskComponent {
       needsTimeSlot,
       startTime,
       endTime,
+      scheduledDate,
       weekdays,
       monthDays,
       minTimeMinutes,

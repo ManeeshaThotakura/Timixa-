@@ -1,4 +1,4 @@
-export type Frequency = 'daily' | 'weekly' | 'monthly' | 'yearly';
+export type Frequency = 'never' | 'daily' | 'weekly' | 'monthly' | 'yearly';
 export type WeekOption = 'every-day' | 'weekdays' | 'weekends' | 'custom';
 export type MonthlyMode = 'day-of-month' | 'pattern';
 export type EndsMode = 'never' | 'on-date' | 'count';

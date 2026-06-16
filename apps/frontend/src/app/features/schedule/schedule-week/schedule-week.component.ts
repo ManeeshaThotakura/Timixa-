@@ -752,7 +752,9 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
 
   private scheduleAt(task: PlannedTask, hour: number, dateStr: string): void {
     const start = `${hour.toString().padStart(2, '0')}:00`;
-    const total = hour * 60 + 60;
+    // Default duration: minTimeMinutes if set, otherwise 15 min (count-only or unconstrained tasks).
+    const minutes = task.minTimeMinutes ?? 15;
+    const total = hour * 60 + minutes;
     const eh = Math.min(23, Math.floor(total / 60));
     const em = total % 60;
     const end = `${eh.toString().padStart(2, '0')}:${em.toString().padStart(2, '0')}`;

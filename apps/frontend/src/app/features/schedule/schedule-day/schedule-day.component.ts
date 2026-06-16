@@ -601,8 +601,9 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
   // ── Shared schedule logic ────────────────────────────────────────────
   private scheduleAt(task: PlannedTask, hour: number): void {
     const start = `${hour.toString().padStart(2, '0')}:00`;
-    // Default 1-hour block
-    const end = this.addMinutesToTime(start, 60);
+    // Default duration: minTimeMinutes if set, otherwise 15 min (count-only or unconstrained tasks).
+    const minutes = task.minTimeMinutes ?? 15;
+    const end = this.addMinutesToTime(start, minutes);
     this.plannedTasks.update(task.id, { startTime: start, endTime: end, needsTimeSlot: true })
       .subscribe(() => this.reload());
   }
