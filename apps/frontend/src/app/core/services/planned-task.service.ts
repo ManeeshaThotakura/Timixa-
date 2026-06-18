@@ -158,6 +158,28 @@ export class PlannedTaskService {
       );
   }
 
+  createSegment(taskId: string, date: string, startTime: string, endTime: string): Observable<PlannedTask> {
+    return this.http
+      .post<PlannedTask>(`${this.base}/${taskId}/segments`, { date, startTime, endTime })
+      .pipe(tap(updated => this._tasks.update(list => list.map(t => (t.id === taskId ? updated : t)))));
+  }
+
+  updateSegment(
+    taskId: string,
+    segmentId: string,
+    patch: { startTime?: string; endTime?: string },
+  ): Observable<PlannedTask> {
+    return this.http
+      .patch<PlannedTask>(`${this.base}/${taskId}/segments/${segmentId}`, patch)
+      .pipe(tap(updated => this._tasks.update(list => list.map(t => (t.id === taskId ? updated : t)))));
+  }
+
+  deleteSegment(taskId: string, segmentId: string): Observable<PlannedTask> {
+    return this.http
+      .delete<PlannedTask>(`${this.base}/${taskId}/segments/${segmentId}`)
+      .pipe(tap(updated => this._tasks.update(list => list.map(t => (t.id === taskId ? updated : t)))));
+  }
+
   applyPermanently(
     id: string,
     date: string,

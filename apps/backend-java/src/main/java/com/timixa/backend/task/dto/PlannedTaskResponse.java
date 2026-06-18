@@ -24,12 +24,14 @@ public record PlannedTaskResponse(
     Integer minCount,
     Integer maxCount,
     List<PlannedTaskExceptionResponse> exceptions,
+    List<PlannedTaskSegmentResponse> segmentsForDate,
     boolean completedToday,
     Instant createdAt, Instant updatedAt
 ) {
     public static PlannedTaskResponse from(
             PlannedTask t,
             List<PlannedTaskExceptionResponse> exceptions,
+            List<PlannedTaskSegmentResponse> segmentsForDate,
             boolean completedToday) {
         return new PlannedTaskResponse(
             t.getId(), t.getUserId(), t.getTitle(), t.getGoal(), t.getColor(),
@@ -43,8 +45,16 @@ public record PlannedTaskResponse(
             t.getMinCount(),
             t.getMaxCount(),
             exceptions == null ? List.of() : exceptions,
+            segmentsForDate == null ? List.of() : segmentsForDate,
             completedToday,
             t.getCreatedAt(), t.getUpdatedAt()
         );
+    }
+
+    public static PlannedTaskResponse from(
+            PlannedTask t,
+            List<PlannedTaskExceptionResponse> exceptions,
+            boolean completedToday) {
+        return from(t, exceptions, List.of(), completedToday);
     }
 }

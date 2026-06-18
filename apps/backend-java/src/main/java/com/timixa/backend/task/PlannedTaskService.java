@@ -5,6 +5,7 @@ import com.timixa.backend.common.TaskNotFoundException;
 import com.timixa.backend.task.dto.PlannedTaskExceptionResponse;
 import com.timixa.backend.task.dto.PlannedTaskRequest;
 import com.timixa.backend.task.dto.PlannedTaskResponse;
+import com.timixa.backend.task.dto.PlannedTaskSegmentResponse;
 import com.timixa.backend.task.dto.PlannedTaskUpdateRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,13 +20,16 @@ public class PlannedTaskService {
     private final PlannedTaskRepository tasks;
     private final PlannedTaskCompletionRepository completions;
     private final PlannedTaskExceptionRepository exceptions;
+    private final PlannedTaskSegmentRepository segments;
 
     public PlannedTaskService(PlannedTaskRepository tasks,
                               PlannedTaskCompletionRepository completions,
-                              PlannedTaskExceptionRepository exceptions) {
+                              PlannedTaskExceptionRepository exceptions,
+                              PlannedTaskSegmentRepository segments) {
         this.tasks = tasks;
         this.completions = completions;
         this.exceptions = exceptions;
+        this.segments = segments;
     }
 
     @Transactional
@@ -72,11 +76,13 @@ public class PlannedTaskService {
             .filter(t -> appliesOn(t, date, exByTaskAndDate.getOrDefault(t.getId(), Map.of())))
             .toList();
         Map<UUID, List<PlannedTaskExceptionResponse>> exMap = exceptionsByTask(filtered);
+        Map<UUID, List<PlannedTaskSegmentResponse>> segMap = segmentsForDate(filtered, date);
         Set<UUID> completedToday = completedIdsForToday(filtered);
         return filtered.stream()
             .map(t -> PlannedTaskResponse.from(
                 t,
                 exMap.getOrDefault(t.getId(), List.of()),
+                segMap.getOrDefault(t.getId(), List.of()),
                 completedToday.contains(t.getId())))
             .toList();
     }
@@ -89,6 +95,18 @@ public class PlannedTaskService {
         boolean completed = !completions
             .findCompletedTaskIds(List.of(t.getId()), LocalDate.now()).isEmpty();
         return PlannedTaskResponse.from(t, ex, completed);
+    }
+
+    @Transactional(readOnly = true)
+    public PlannedTaskResponse findOneForDate(UUID userId, UUID taskId, LocalDate date) {
+        PlannedTask t = requireOwnedTask(userId, taskId);
+        List<PlannedTaskExceptionResponse> ex = exceptions.findByTaskIdIn(List.of(t.getId())).stream()
+            .map(PlannedTaskExceptionResponse::from).toList();
+        List<PlannedTaskSegmentResponse> seg = segments.findByTaskIdAndSegmentDate(t.getId(), date).stream()
+            .map(PlannedTaskSegmentResponse::from).toList();
+        boolean completed = !completions
+            .findCompletedTaskIds(List.of(t.getId()), LocalDate.now()).isEmpty();
+        return PlannedTaskResponse.from(t, ex, seg, completed);
     }
 
     @Transactional
@@ -133,6 +151,7 @@ public class PlannedTaskService {
         PlannedTask t = requireOwnedTask(userId, taskId);
         completions.deleteByTaskId(taskId);
         exceptions.deleteByTaskId(taskId);
+        segments.deleteByTaskId(taskId);
         tasks.delete(t);
     }
 
@@ -188,6 +207,17 @@ public class PlannedTaskService {
         for (PlannedTaskException e : exceptions.findByTaskIdIn(ids)) {
             out.computeIfAbsent(e.getTaskId(), k -> new HashMap<>())
                .put(e.getExceptionDate(), e.getExceptionType());
+        }
+        return out;
+    }
+
+    private Map<UUID, List<PlannedTaskSegmentResponse>> segmentsForDate(List<PlannedTask> list, LocalDate date) {
+        if (list.isEmpty()) return Map.of();
+        List<UUID> ids = list.stream().map(PlannedTask::getId).toList();
+        Map<UUID, List<PlannedTaskSegmentResponse>> out = new HashMap<>();
+        for (PlannedTaskSegment s : segments.findByTaskIdInAndSegmentDate(ids, date)) {
+            out.computeIfAbsent(s.getTaskId(), k -> new ArrayList<>())
+               .add(PlannedTaskSegmentResponse.from(s));
         }
         return out;
     }

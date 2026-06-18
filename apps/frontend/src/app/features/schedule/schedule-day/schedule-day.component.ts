@@ -8,6 +8,12 @@ import { ExceptionPopupComponent } from '../exception-popup.component';
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i); // 00:00 – 23:00
 
+// A rendered bar on the grid. Either the task's template times (segmentId=null)
+// or one of its per-date segments.
+interface DayBar extends PlannedTask {
+  _segmentId: string | null;
+}
+
 @Component({
   selector: 'app-schedule-day',
   standalone: true,
@@ -43,8 +49,9 @@ const HOURS = Array.from({ length: 24 }, (_, i) => i); // 00:00 – 23:00
       </div>
     </div>
 
-    <!-- Unplanned Tasks -->
-    <section class="mt-stack-lg" *ngIf="unscheduledTasks.length > 0">
+    <!-- Unplanned Tasks (stays at top because the time grid below has its own scroll context) -->
+    <section class="mt-stack-md pt-2 pb-2"
+             *ngIf="unscheduledTasks.length > 0">
       <div class="px-margin-page flex justify-between items-end mb-1">
         <h3 class="text-label-sm font-label-sm text-on-surface-variant uppercase tracking-widest">Unplanned</h3>
         <span class="text-label-sm text-primary font-semibold">{{ unscheduledTasks.length }} Remaining</span>
@@ -86,6 +93,10 @@ const HOURS = Array.from({ length: 24 }, (_, i) => i); // 00:00 – 23:00
             </div>
           </div>
           <p class="font-semibold text-[15px] text-on-surface mb-1 truncate">{{ task.title }}</p>
+          <div *ngIf="remainingMinutes(task) > 0"
+               class="text-[10px] font-bold text-primary uppercase tracking-wider mb-1">
+            {{ remainingMinutes(task) }} min remaining
+          </div>
           <div class="flex items-center justify-between text-[11px] text-on-surface-variant">
             <span class="text-outline">{{ task.cadence }}</span>
           </div>
@@ -93,9 +104,11 @@ const HOURS = Array.from({ length: 24 }, (_, i) => i); // 00:00 – 23:00
       </div>
     </section>
 
-    <!-- Time Grid -->
-    <section class="px-margin-page mt-stack-md relative pb-8">
-      <div>
+    <!-- Time Grid (own scroll context so the unplanned queue above stays visible) -->
+    <section class="px-margin-page mt-stack-md relative">
+      <div class="overflow-y-auto"
+           style="-ms-overflow-style:none;scrollbar-width:none; max-height:calc(100vh - 360px); min-height:380px; overscroll-behavior: contain;"
+           (click)="onGridClick($event)">
         <div *ngFor="let hour of hours"
              [attr.data-hour]="hour"
              class="flex border-t border-slate-100 relative"
@@ -123,39 +136,59 @@ const HOURS = Array.from({ length: 24 }, (_, i) => i); // 00:00 – 23:00
             <!-- Scheduled events -->
             <div *ngFor="let evt of getEventsForHour(hour)"
                  [attr.data-event-id]="evt.id"
-                 class="absolute rounded-lg px-3 flex items-center gap-2 border-l-4 select-none cursor-grab active:cursor-grabbing"
-                 style="box-shadow:0 2px 8px rgba(0,0,0,0.06); touch-action: none;"
+                 class="absolute rounded-lg border-l-4 select-none cursor-pointer transition-all overflow-hidden"
+                 style="touch-action: none;"
                  [style.opacity]="movingEventId() === evt.id ? '0.35' : '1'"
+                 [style.zIndex]="selectedEventId() === evt.id ? 25 : 10"
                  [ngStyle]="getEventBoxStyle(evt)"
                  [style.background]="getEventBg()"
                  [style.borderLeftColor]="getEventBorder(evt.color)"
+                 [style.boxShadow]="selectedEventId() === evt.id
+                   ? '0 0 0 2px ' + getEventBorder(evt.color) + ', 0 8px 24px rgba(94,67,251,0.18)'
+                   : '0 2px 8px rgba(0,0,0,0.06)'"
                  (mousedown)="onEventDown($event, evt)"
                  (touchstart)="onEventDown($event, evt)">
-              <span class="material-symbols-outlined text-[16px] flex-shrink-0 opacity-70 -ml-1.5 relative z-10"
-                    [style.color]="getEventBorder(evt.color)"
-                    style="cursor: grab; touch-action: none;">
-                drag_indicator
-              </span>
-              <span class="material-symbols-outlined text-sm flex-shrink-0"
-                    [style.color]="getEventBorder(evt.color)">
-                task_alt
-              </span>
-              <span class="text-sm font-semibold truncate flex-1"
-                    [style.color]="getEventBorder(evt.color)">
-                {{ evt.title }}
-              </span>
-              <span class="text-[10px] font-medium flex-shrink-0"
-                    [style.color]="getEventBorder(evt.color)">
-                {{ resizingEventId() === evt.id ? resizingTimeLabel() : (evt.startTime || '') + '–' + (evt.endTime || '') }}
-              </span>
 
-              <!-- Resize handle (kept narrow & off the left edge so it never overlaps the drag indicator) -->
-              <div class="absolute bottom-0 left-10 right-2 h-3 flex items-center justify-center cursor-ns-resize hover:bg-primary/10 transition-colors"
+              <!-- Content row (icons, title, time) -->
+              <div class="flex items-center gap-2 px-3 h-full"
+                   [class.pb-4]="selectedEventId() === evt.id">
+                <span class="material-symbols-outlined text-[16px] flex-shrink-0 opacity-70 -ml-1.5 relative z-10"
+                      [style.color]="getEventBorder(evt.color)"
+                      [style.cursor]="selectedEventId() === evt.id ? 'grab' : 'pointer'"
+                      style="touch-action: none;">
+                  drag_indicator
+                </span>
+                <span class="material-symbols-outlined text-sm flex-shrink-0"
+                      [style.color]="getEventBorder(evt.color)">
+                  task_alt
+                </span>
+                <span class="text-sm font-semibold truncate flex-1"
+                      [style.color]="getEventBorder(evt.color)">
+                  {{ evt.title }}
+                </span>
+                <button type="button"
+                        class="text-[10px] font-medium flex-shrink-0 rounded-md transition-colors border-0"
+                        data-time-label
+                        [class.px-2]="selectedEventId() === evt.id"
+                        [class.py-1]="selectedEventId() === evt.id"
+                        [style.color]="getEventBorder(evt.color)"
+                        [style.background]="selectedEventId() === evt.id ? 'rgba(94,67,251,0.18)' : 'transparent'"
+                        [style.cursor]="selectedEventId() === evt.id ? 'pointer' : 'default'"
+                        (mousedown)="onTimeLabelDown($event, evt)"
+                        (touchstart)="onTimeLabelDown($event, evt)"
+                        (click)="onTimeLabelClick($event, evt)">
+                  {{ resizingEventId() === evt.id ? resizingTimeLabel() : (evt.startTime || '') + '–' + (evt.endTime || '') }}
+                </button>
+              </div>
+
+              <!-- Resize handle row — only visible & active when card is selected -->
+              <div *ngIf="selectedEventId() === evt.id"
+                   class="absolute left-0 right-0 bottom-0 h-4 flex items-center justify-center cursor-ns-resize"
                    data-resize-handle
-                   style="touch-action: none;"
+                   style="touch-action: none; background: rgba(94,67,251,0.22);"
                    (mousedown)="onResizeStart($event, evt)"
                    (touchstart)="onResizeStart($event, evt)">
-                <div class="w-8 h-1 rounded-full bg-on-surface-variant/30"></div>
+                <div class="w-16 h-1 rounded-full pointer-events-none" [style.background]="getEventBorder(evt.color)"></div>
               </div>
             </div>
           </div>
@@ -282,6 +315,7 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
     ghost: HTMLElement | null;
   } | null = null;
   movingEventId = signal<string | null>(null);
+  selectedEventId = signal<string | null>(null);
   private readonly boundMoveTrack = (e: MouseEvent | TouchEvent) => this.onMoveTrack(e);
   private readonly boundMoveEnd = (e: MouseEvent | TouchEvent) => this.onMoveEnd(e);
 
@@ -337,13 +371,42 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
 
   get unscheduledTasks(): PlannedTask[] {
     const id = this.highlightedTaskId();
-    const all = this.tasksForDay().filter(t => t.needsTimeSlot && !t.startTime);
+    const all = this.tasksForDay().filter(t => {
+      if (!t.needsTimeSlot) return false;
+      const scheduled = this.scheduledMinutesOnDate(t);
+      if (scheduled === 0) return true;
+      return (t.minTimeMinutes ?? 0) > scheduled;
+    });
     if (!id) return all;
     return [...all.filter(t => t.id === id), ...all.filter(t => t.id !== id)];
   }
 
-  get todayEvents(): PlannedTask[] {
-    return this.tasksForDay().filter(t => !!t.startTime && !!t.endTime);
+  get todayEvents(): DayBar[] {
+    const out: DayBar[] = [];
+    for (const t of this.tasksForDay()) {
+      const segs = t.segmentsForDate ?? [];
+      if (segs.length > 0) {
+        for (const s of segs) {
+          out.push({ ...t, _segmentId: s.id, startTime: s.startTime, endTime: s.endTime });
+        }
+      } else if (t.startTime && t.endTime) {
+        out.push({ ...t, _segmentId: null });
+      }
+    }
+    return out;
+  }
+
+  scheduledMinutesOnDate(t: PlannedTask): number {
+    const segs = t.segmentsForDate ?? [];
+    if (segs.length > 0) {
+      return segs.reduce((sum, s) => sum + this.diffMinutes(s.startTime, s.endTime), 0);
+    }
+    if (t.startTime && t.endTime) return this.diffMinutes(t.startTime, t.endTime);
+    return 0;
+  }
+
+  remainingMinutes(t: PlannedTask): number {
+    return Math.max(0, (t.minTimeMinutes ?? 0) - this.scheduledMinutesOnDate(t));
   }
 
   get progressPercent(): number {
@@ -600,12 +663,32 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
 
   // ── Shared schedule logic ────────────────────────────────────────────
   private scheduleAt(task: PlannedTask, hour: number): void {
+    const date = this.dateStr;
     const start = `${hour.toString().padStart(2, '0')}:00`;
-    // Default duration: minTimeMinutes if set, otherwise 15 min (count-only or unconstrained tasks).
-    const minutes = task.minTimeMinutes ?? 15;
-    const end = this.addMinutesToTime(start, minutes);
-    this.plannedTasks.update(task.id, { startTime: start, endTime: end, needsTimeSlot: true })
-      .subscribe(() => this.reload());
+    // Duration default: remainder if it's set, else minTimeMinutes if set, else 15 min.
+    const remaining = this.remainingMinutes(task);
+    const dur = remaining > 0 ? remaining : (task.minTimeMinutes ?? 15);
+    const end = this.addMinutesToTime(start, dur);
+
+    const segs = task.segmentsForDate ?? [];
+    if (segs.length === 0 && task.startTime && task.endTime) {
+      // Template times currently render the day's bar. Lift them into a segment first so
+      // they don't disappear when we add the new chunk (segments replace template render).
+      this.plannedTasks.createSegment(task.id, date, task.startTime, task.endTime).subscribe({
+        next: () => this.plannedTasks.createSegment(task.id, date, start, end)
+          .subscribe(() => this.reload()),
+        error: () => this.plannedTasks.createSegment(task.id, date, start, end)
+          .subscribe(() => this.reload()),
+      });
+    } else if (segs.length === 0 && !task.startTime) {
+      // First time scheduling. Set template times so the task has a default for other dates.
+      this.plannedTasks.update(task.id, { startTime: start, endTime: end, needsTimeSlot: true })
+        .subscribe(() => this.reload());
+    } else {
+      // Already has segments — just add another.
+      this.plannedTasks.createSegment(task.id, date, start, end)
+        .subscribe(() => this.reload());
+    }
   }
 
   // ── Resize handle (bottom edge of event) ────────────────────────────
@@ -638,12 +721,23 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
     this.doc.removeEventListener('touchend', this.boundResizeEnd as EventListener);
 
     this.zone.run(() => {
-      if (this.resizeEvent && this.resizeEvent.startTime) {
+      const moved = Math.abs(this.resizingHeight() - this.resizeStartHeight) > 1;
+      if (moved && this.resizeEvent && this.resizeEvent.startTime) {
         const minutes = this.pixelsToMinutes(this.resizingHeight());
         if (minutes > 0) {
           const newEnd = this.addMinutesToTime(this.resizeEvent.startTime, minutes);
-          this.plannedTasks.update(this.resizeEvent.id, { endTime: newEnd })
-            .subscribe(() => this.reload());
+          const bar = this.resizeEvent as DayBar;
+          if (bar._segmentId) {
+            // Segment bar — silent update, no popup.
+            this.plannedTasks.updateSegment(bar.id, bar._segmentId, { endTime: newEnd })
+              .subscribe(() => this.reload());
+          } else if (bar.cadence === 'ONCE') {
+            // One-off, no popup either.
+            this.plannedTasks.update(bar.id, { endTime: newEnd })
+              .subscribe(() => this.reload());
+          } else {
+            this.askTimePopupFor(bar, this.dateStr, bar.startTime!, newEnd);
+          }
         }
       }
       this.resizingEventId.set(null);
@@ -652,13 +746,47 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
     });
   }
 
-  // ── Pointer interaction: click → edit, drag → move ──────────────────
+  private askTimePopupFor(task: PlannedTask, date: string, start: string, newEnd: string): void {
+    const unit = this.cadenceUnitLabel(task, date);
+    this.openPopup(
+      `Apply this time to every ${unit}?`,
+      `Yes, every ${unit}`,
+      'No, just this date',
+      () => this.plannedTasks.update(task.id, { startTime: start, endTime: newEnd })
+        .subscribe(() => this.reload()),
+      () => this.plannedTasks.createSegment(task.id, date, start, newEnd)
+        .subscribe(() => this.reload()),
+    );
+  }
+
+  private cadenceUnitLabel(task: PlannedTask, dateIso: string): string {
+    if (task.cadence === 'DAILY') return 'day';
+    if (task.cadence === 'WEEKLY') {
+      const wd = new Date(dateIso + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long' });
+      return wd;
+    }
+    if (task.cadence === 'MONTHLY') {
+      const day = new Date(dateIso + 'T00:00:00').getDate();
+      return `day ${day} of the month`;
+    }
+    return 'occurrence';
+  }
+
+  // ── Pointer interaction: tap → select, drag (when selected) → move ─
   onEventDown(event: MouseEvent | TouchEvent, evt: PlannedTask): void {
-    if ((event.target as HTMLElement).closest('[data-resize-handle]')) return;
+    const target = event.target as HTMLElement;
+    if (target.closest('[data-resize-handle]')) return;
+    if (target.closest('[data-time-label]')) return;
     if (this.moveDrag) this.cancelMoveDrag();
 
     event.stopPropagation();
     if ('touches' in event) event.preventDefault();
+
+    // First tap selects the card without starting a drag.
+    if (this.selectedEventId() !== evt.id) {
+      this.selectedEventId.set(evt.id);
+      return;
+    }
 
     this.moveDrag = {
       evt,
@@ -731,12 +859,19 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
           const duration = this.diffMinutes(drag.evt.startTime, drag.evt.endTime);
           const newStart = `${drag.hoverHour.toString().padStart(2, '0')}:00`;
           const newEnd = this.addMinutesToTime(newStart, duration);
-          this.plannedTasks.update(drag.evt.id, { startTime: newStart, endTime: newEnd })
-            .subscribe(() => this.reload());
+          const bar = drag.evt as DayBar;
+          if (bar._segmentId) {
+            this.plannedTasks.updateSegment(bar.id, bar._segmentId, { startTime: newStart, endTime: newEnd })
+              .subscribe(() => this.reload());
+          } else if (bar.cadence === 'ONCE') {
+            this.plannedTasks.update(bar.id, { startTime: newStart, endTime: newEnd })
+              .subscribe(() => this.reload());
+          } else {
+            this.askTimePopupFor(bar, this.dateStr, newStart, newEnd);
+          }
         }
-      } else {
-        this.openEditModal(drag.evt);
       }
+      // No movement → keep selection; do not open the modal (use time-label tap for that).
       this.movingEventId.set(null);
       this.dragOverHour.set(null);
     });
@@ -785,6 +920,26 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
     this.editingEvent.set(evt);
     this.editStart = evt.startTime || '';
     this.editEnd = evt.endTime || '';
+  }
+
+  onTimeLabelDown(event: MouseEvent | TouchEvent, _evt: PlannedTask): void {
+    // Swallow the pointer-down so the card's drag-tracking handler never fires
+    // on the time pill. The click event still propagates and runs onTimeLabelClick.
+    event.stopPropagation();
+  }
+
+  onTimeLabelClick(event: Event, evt: PlannedTask): void {
+    event.stopPropagation();
+    if (this.selectedEventId() !== evt.id) {
+      this.selectedEventId.set(evt.id);
+      return;
+    }
+    this.openEditModal(evt);
+  }
+
+  onGridClick(event: MouseEvent): void {
+    if ((event.target as HTMLElement).closest('[data-event-id]')) return;
+    this.selectedEventId.set(null);
   }
 
   closeEditModal(): void {
