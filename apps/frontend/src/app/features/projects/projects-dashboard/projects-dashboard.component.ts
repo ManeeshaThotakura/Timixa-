@@ -1,11 +1,19 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { ProjectService } from '../../../core/services/project.service';
-import { Project } from '../../../core/models/project.model';
+import { Project, TeamMember, Task } from '../../../core/models/project.model';
+import { typeInfo, TaskTypeDef } from '../task-meta';
 
 const AVATAR_COLORS = ['#451de3', '#006688', '#4b4f52', '#00c1fd', '#ba1a1a'];
+const PROJECT_COLORS = ['#451de3', '#00c1fd', '#006688', '#15803d', '#ba1a1a', '#4b4f52'];
+
+const STATUS_STYLE: Record<Task['status'], { label: string; bg: string; color: string }> = {
+  'todo':        { label: 'Open',        bg: '#e2e2e5', color: '#43474a' },
+  'in-progress': { label: 'In Progress', bg: '#e4dfff', color: '#3c03dd' },
+  'done':        { label: 'Closed',      bg: '#dcfce7', color: '#16a34a' },
+};
 
 @Component({
   selector: 'app-projects-dashboard',
@@ -99,9 +107,9 @@ const AVATAR_COLORS = ['#451de3', '#006688', '#4b4f52', '#00c1fd', '#ba1a1a'];
 
       </section>
 
-      <!-- Project Cards -->
-      <section class="flex flex-col gap-4">
-        <div *ngFor="let project of projects(); let i = index"
+      <!-- Project Cards (List view) -->
+      <section *ngIf="viewMode === 'list'" class="flex flex-col gap-4">
+        <div *ngFor="let project of projects()"
              (click)="openKanban(project.id)"
              class="bg-white p-6 rounded-[24px] relative overflow-hidden cursor-pointer transition-all duration-300"
              [style.opacity]="project.status === 'paused' ? '0.85' : '1'"
@@ -155,18 +163,29 @@ const AVATAR_COLORS = ['#451de3', '#006688', '#4b4f52', '#00c1fd', '#ba1a1a'];
                 </div>
               </div>
 
-              <!-- Avatar stack -->
-              <div class="flex -space-x-3 mt-2">
-                <div *ngFor="let c of avatarColors(i); let ai = index"
-                     class="w-9 h-9 rounded-full border-2 border-white flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0"
-                     [style.background]="c"
-                     [style.zIndex]="10 - ai">
-                  {{ avatarInitials[ai] }}
+              <!-- Avatar stack / unassigned -->
+              <div class="mt-2">
+                <div *ngIf="!isUnassigned(project); else unassigned" class="flex -space-x-3">
+                  <div *ngFor="let m of project.members; let ai = index"
+                       class="w-9 h-9 rounded-full border-2 border-white overflow-hidden flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0"
+                       [style.background]="avatarColor(ai)"
+                       [style.zIndex]="10 - ai">
+                    <img *ngIf="avatarPhoto(m) as url; else cardInitial" [src]="url" [alt]="m"
+                         class="w-full h-full object-cover" />
+                    <ng-template #cardInitial>{{ m }}</ng-template>
+                  </div>
+                  <div *ngIf="project.moreMembers > 0"
+                       class="w-9 h-9 rounded-full border-2 border-white flex items-center justify-center text-[12px] font-semibold text-on-surface-variant flex-shrink-0"
+                       style="background:#e8e8ea; z-index:1;">
+                    +{{ project.moreMembers }}
+                  </div>
                 </div>
-                <div class="w-9 h-9 rounded-full border-2 border-white flex items-center justify-center text-[12px] font-semibold text-on-surface-variant flex-shrink-0"
-                     style="background:#e8e8ea; z-index:1;">
-                  +{{ overflowCount(i) }}
-                </div>
+                <ng-template #unassigned>
+                  <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-container text-on-surface-variant text-[12px] font-semibold">
+                    <span class="material-symbols-outlined text-[16px]">person_off</span>
+                    Unassigned
+                  </span>
+                </ng-template>
               </div>
             </div>
 
@@ -179,10 +198,86 @@ const AVATAR_COLORS = ['#451de3', '#006688', '#4b4f52', '#00c1fd', '#ba1a1a'];
           No projects yet. Tap + to create one.
         </div>
       </section>
+
+      <!-- Board view (expandable projects → tasks, Jira-style) -->
+      <section *ngIf="viewMode === 'grid'" class="flex flex-col gap-3">
+        <div class="flex items-center justify-end gap-3 mb-1">
+          <button (click)="expandAll()" class="text-[12px] font-bold text-primary">Expand all</button>
+          <button (click)="collapseAll()" class="text-[12px] font-bold text-on-surface-variant">Collapse all</button>
+        </div>
+
+        <div *ngFor="let project of projects()"
+             class="bg-white rounded-[20px] overflow-hidden"
+             style="box-shadow:0 8px 24px rgba(94,67,251,0.04);">
+
+          <!-- Project header row -->
+          <button (click)="toggleExpand(project.id)"
+                  class="w-full flex items-center gap-3 p-4 text-left active:scale-[0.99] transition-transform">
+            <span class="material-symbols-outlined text-outline transition-transform duration-200"
+                  [class.rotate-90]="isExpanded(project.id)">chevron_right</span>
+            <div class="w-1.5 h-9 rounded-full flex-shrink-0" [style.background]="project.color"></div>
+            <div class="flex-1 min-w-0">
+              <h3 class="font-bold text-[16px] text-on-surface truncate font-manrope">{{ project.title }}</h3>
+              <p class="text-[12px] text-on-surface-variant">{{ taskSummary(project.id) }}</p>
+            </div>
+            <div class="flex flex-col items-end gap-1 flex-shrink-0">
+              <span class="text-[13px] font-bold" [style.color]="progressTextColor(project)">{{ project.progress }}%</span>
+              <div class="w-16 h-1.5 bg-surface-container-high rounded-full overflow-hidden">
+                <div class="h-full rounded-full" [style.width.%]="project.progress" [style.background]="progressGradient(project)"></div>
+              </div>
+            </div>
+          </button>
+
+          <!-- Tasks (subtasks) -->
+          <div *ngIf="isExpanded(project.id)" class="border-t border-surface-container">
+            <div *ngFor="let task of tasksFor(project.id)"
+                 (click)="openKanban(project.id)"
+                 class="flex items-center gap-3 px-4 py-3 border-b border-surface-container last:border-b-0
+                        hover:bg-surface-container-low cursor-pointer transition-colors">
+              <span class="w-6 h-6 rounded flex items-center justify-center flex-shrink-0"
+                    [style.background]="typeOf(task).bg">
+                <span class="material-symbols-outlined text-[15px]" [style.color]="typeOf(task).color">{{ typeOf(task).icon }}</span>
+              </span>
+              <span class="flex-1 min-w-0 text-[14px] font-medium text-on-surface truncate"
+                    [class.line-through]="task.status === 'done'"
+                    [class.text-on-surface-variant]="task.status === 'done'">
+                {{ task.title }}
+              </span>
+              <span class="text-[10px] px-2 py-0.5 rounded-full font-bold flex-shrink-0"
+                    [style.background]="statusOf(task).bg" [style.color]="statusOf(task).color">
+                {{ statusOf(task).label }}
+              </span>
+              <span class="w-6 h-6 rounded-full overflow-hidden flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0"
+                    *ngIf="memberOf(task) as m; else taskUnassigned" [style.background]="m.color" [title]="m.name">
+                <img *ngIf="m.avatarUrl; else tmi" [src]="m.avatarUrl" [alt]="m.name" class="w-full h-full object-cover" />
+                <ng-template #tmi>{{ m.initials }}</ng-template>
+              </span>
+              <ng-template #taskUnassigned>
+                <span class="w-6 h-6 rounded-full bg-surface-container flex items-center justify-center text-on-surface-variant flex-shrink-0" title="Unassigned">
+                  <span class="material-symbols-outlined text-[14px]">person</span>
+                </span>
+              </ng-template>
+            </div>
+
+            <div *ngIf="!tasksFor(project.id).length" class="px-4 py-5 text-center text-[13px] text-on-surface-variant">
+              No tasks yet.
+            </div>
+
+            <button (click)="openKanban(project.id)"
+                    class="w-full py-3 text-[13px] font-bold text-primary flex items-center justify-center gap-1 hover:bg-surface-container-low transition-colors">
+              Open board <span class="material-symbols-outlined text-[16px]">arrow_forward</span>
+            </button>
+          </div>
+        </div>
+
+        <div *ngIf="projects().length === 0" class="text-center py-16 text-on-surface-variant text-sm">
+          No projects yet. Tap + to create one.
+        </div>
+      </section>
     </div>
 
     <!-- FAB -->
-    <button (click)="showModal = true"
+    <button (click)="openCreate()"
             class="fixed bottom-28 right-6 w-16 h-16 rounded-full text-white flex items-center justify-center active:scale-90 transition-all duration-300 z-50"
             style="background:linear-gradient(135deg,#451de3,#00c1fd); box-shadow:0 12px 24px rgba(94,67,251,0.3);">
       <span class="material-symbols-outlined text-[32px]">add</span>
@@ -193,28 +288,131 @@ const AVATAR_COLORS = ['#451de3', '#006688', '#4b4f52', '#00c1fd', '#ba1a1a'];
          class="fixed inset-0 z-[9999] flex items-end justify-center"
          (click)="showModal = false">
       <div class="absolute inset-0 bg-black/30 backdrop-blur-sm"></div>
-      <div class="relative bg-white rounded-t-[28px] w-full p-6 pb-10"
+      <div class="relative bg-white rounded-t-[28px] w-full max-h-[88vh] overflow-y-auto p-6 pb-10"
            style="box-shadow:0 -8px 40px rgba(0,0,0,0.12);"
            (click)="$event.stopPropagation()">
-        <div class="w-12 h-1 rounded-full bg-outline-variant mx-auto mb-6"></div>
+        <div class="w-12 h-1 rounded-full bg-outline-variant mx-auto mb-6 sticky top-0"></div>
         <h3 class="font-bold text-[24px] text-on-surface mb-5" style="font-family:Manrope;">New Project</h3>
-        <div class="mb-3">
+
+        <!-- Title -->
+        <div class="mb-4">
           <label class="text-[11px] font-bold text-outline uppercase tracking-wider mb-1 block">Project Title</label>
-          <input type="text" [(ngModel)]="newProjectTitle" placeholder="e.g., Website Redesign"
+          <input type="text" [(ngModel)]="form.title" placeholder="e.g., Website Redesign"
                  class="w-full px-4 py-3 rounded-2xl bg-surface-container text-on-surface text-[16px] font-medium outline-none border border-transparent focus:border-primary/20 transition-all" />
         </div>
-        <div class="mb-6">
+
+        <!-- Description -->
+        <div class="mb-4">
           <label class="text-[11px] font-bold text-outline uppercase tracking-wider mb-1 block">Description</label>
-          <input type="text" [(ngModel)]="newProjectDesc" placeholder="Short description"
+          <textarea [(ngModel)]="form.description" placeholder="What is this project about?" rows="2"
+                    class="w-full px-4 py-3 rounded-2xl bg-surface-container text-on-surface text-[16px] font-medium outline-none border border-transparent focus:border-primary/20 transition-all resize-none"></textarea>
+        </div>
+
+        <!-- Priority -->
+        <div class="mb-4">
+          <label class="text-[11px] font-bold text-outline uppercase tracking-wider mb-2 block">Priority</label>
+          <div class="bg-surface-container p-1 rounded-2xl flex gap-1">
+            <button *ngFor="let p of priorities" (click)="form.priority = p"
+                    class="flex-1 py-2.5 rounded-xl capitalize font-semibold text-[13px] transition-all"
+                    [class]="form.priority === p
+                      ? 'bg-white shadow-sm text-primary'
+                      : 'text-on-surface-variant'">
+              {{ p }}
+            </button>
+          </div>
+        </div>
+
+        <!-- Dates -->
+        <div class="flex gap-3 mb-4">
+          <div class="flex-1">
+            <label class="text-[11px] font-bold text-outline uppercase tracking-wider mb-1 block">Start Date</label>
+            <input type="date" [(ngModel)]="form.startDate"
+                   class="w-full px-4 py-3 rounded-2xl bg-surface-container text-on-surface text-[14px] font-medium outline-none border border-transparent focus:border-primary/20 transition-all" />
+          </div>
+          <div class="flex-1">
+            <label class="text-[11px] font-bold text-outline uppercase tracking-wider mb-1 block">Due Date</label>
+            <input type="date" [(ngModel)]="form.dueDate" [min]="form.startDate"
+                   class="w-full px-4 py-3 rounded-2xl bg-surface-container text-on-surface text-[14px] font-medium outline-none border border-transparent focus:border-primary/20 transition-all" />
+          </div>
+        </div>
+
+        <!-- Assignees -->
+        <div class="mb-4">
+          <label class="text-[11px] font-bold text-outline uppercase tracking-wider mb-2 block">Assignees</label>
+
+          <!-- Selected assignees -->
+          <div *ngIf="selectedMembers().length" class="flex flex-wrap gap-2 mb-2">
+            <span *ngFor="let m of selectedMembers()"
+                  class="flex items-center gap-2 pl-1 pr-2 py-1 rounded-full bg-primary/10 border border-primary">
+              <span class="w-6 h-6 rounded-full overflow-hidden flex items-center justify-center text-white text-[10px] font-bold"
+                    [style.background]="m.color">
+                <img *ngIf="m.avatarUrl; else chipInit" [src]="m.avatarUrl" [alt]="m.name" class="w-full h-full object-cover" />
+                <ng-template #chipInit>{{ m.initials }}</ng-template>
+              </span>
+              <span class="text-[13px] font-semibold text-on-surface">{{ m.name }}</span>
+              <button (click)="removeAssignee(m.id)"
+                      class="material-symbols-outlined text-[16px] text-on-surface-variant hover:text-error">close</button>
+            </span>
+          </div>
+
+          <!-- Search -->
+          <div class="relative">
+            <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[20px] text-on-surface-variant">search</span>
+            <input type="text" [(ngModel)]="assigneeQuery" placeholder="Search people to assign..."
+                   class="w-full pl-10 pr-4 py-3 rounded-2xl bg-surface-container text-on-surface text-[15px] font-medium outline-none border border-transparent focus:border-primary/20 transition-all" />
+
+            <!-- Results -->
+            <div *ngIf="assigneeQuery.trim()"
+                 class="absolute z-20 mt-1 w-full bg-white rounded-2xl overflow-hidden max-h-52 overflow-y-auto"
+                 style="box-shadow:0 8px 30px rgba(0,0,0,0.12);">
+              <button *ngFor="let m of filteredMembers()" (click)="addAssignee(m.id)"
+                      class="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-surface-container transition-colors text-left">
+                <span class="w-7 h-7 rounded-full overflow-hidden flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0"
+                      [style.background]="m.color">
+                  <img *ngIf="m.avatarUrl; else resultInit" [src]="m.avatarUrl" [alt]="m.name" class="w-full h-full object-cover" />
+                  <ng-template #resultInit>{{ m.initials }}</ng-template>
+                </span>
+                <span class="text-[14px] font-semibold text-on-surface">{{ m.name }}</span>
+              </button>
+              <p *ngIf="!filteredMembers().length"
+                 class="px-3 py-3 text-[13px] text-on-surface-variant">No people found.</p>
+            </div>
+          </div>
+
+          <p *ngIf="!selectedMembers().length"
+             class="text-[12px] text-on-surface-variant mt-2 flex items-center gap-1">
+            <span class="material-symbols-outlined text-[16px]">info</span>
+            Leave empty to create an unassigned project.
+          </p>
+        </div>
+
+        <!-- Tags -->
+        <div class="mb-4">
+          <label class="text-[11px] font-bold text-outline uppercase tracking-wider mb-1 block">Tags</label>
+          <input type="text" [(ngModel)]="form.tagsInput" placeholder="Comma separated, e.g. Design, Q4"
                  class="w-full px-4 py-3 rounded-2xl bg-surface-container text-on-surface text-[16px] font-medium outline-none border border-transparent focus:border-primary/20 transition-all" />
         </div>
+
+        <!-- Color -->
+        <div class="mb-6">
+          <label class="text-[11px] font-bold text-outline uppercase tracking-wider mb-2 block">Accent Color</label>
+          <div class="flex gap-3">
+            <button *ngFor="let c of projectColors" (click)="form.color = c"
+                    class="w-9 h-9 rounded-full transition-all"
+                    [style.background]="c"
+                    [class]="form.color === c ? 'ring-2 ring-offset-2 ring-on-surface scale-110' : ''">
+            </button>
+          </div>
+        </div>
+
+        <!-- Actions -->
         <div class="flex gap-3">
           <button (click)="showModal = false"
                   class="flex-1 py-3.5 rounded-2xl bg-surface-container text-on-surface-variant text-[14px] font-bold transition-all active:scale-95">
             Cancel
           </button>
-          <button (click)="addProject()"
-                  [disabled]="!newProjectTitle.trim()"
+          <button (click)="createProject()"
+                  [disabled]="!canCreate()"
                   class="flex-1 py-3.5 rounded-2xl text-white text-[14px] font-bold transition-all active:scale-95 disabled:opacity-40"
                   style="background:linear-gradient(135deg,#451de3,#00c1fd);">
             Create
@@ -231,22 +429,112 @@ export class ProjectsDashboardComponent implements OnInit {
   projects = this.projectService.projects;
   stats    = this.projectService.stats;
 
-  viewMode: 'list' | 'grid' = 'list';
-  showModal       = false;
-  newProjectTitle = '';
-  newProjectDesc  = '';
+  teamMembers = this.projectService.teamMembers;
 
-  readonly avatarInitials = ['A', 'B', 'C'];
+  viewMode: 'list' | 'grid' = 'list';
+  showModal = false;
+  assigneeQuery = '';
+
+  readonly priorities: Project['priority'][] = ['low', 'medium', 'high'];
+  readonly projectColors = PROJECT_COLORS;
+
+  form = this.emptyForm();
 
   ngOnInit(): void { this.projectService.load(); }
 
   openKanban(id: string): void { this.router.navigate(['/projects', id, 'board']); }
 
-  addProject(): void {
-    if (!this.newProjectTitle.trim()) return;
-    this.newProjectTitle = '';
-    this.newProjectDesc  = '';
-    this.showModal       = false;
+  // ── Board view (expandable projects → tasks) ───────────────────────
+  expandedProjects = signal<Set<string>>(new Set<string>());
+
+  toggleExpand(id: string): void {
+    this.expandedProjects.update(set => {
+      const next = new Set(set);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  isExpanded(id: string): boolean { return this.expandedProjects().has(id); }
+  expandAll(): void { this.expandedProjects.set(new Set(this.projects().map(p => p.id))); }
+  collapseAll(): void { this.expandedProjects.set(new Set<string>()); }
+
+  tasksFor(projectId: string): Task[] {
+    const k = this.projectService.getKanbanByProject(projectId);
+    return [...k.todo, ...k.inProgress, ...k.done];
+  }
+
+  typeOf(task: Task): TaskTypeDef { return typeInfo(task); }
+  statusOf(task: Task): { label: string; bg: string; color: string } { return STATUS_STYLE[task.status]; }
+  memberOf(task: Task): TeamMember | undefined {
+    return this.teamMembers.find(m => m.id === task.assigneeId);
+  }
+
+  openCreate(): void {
+    this.form = this.emptyForm();
+    this.assigneeQuery = '';
+    this.showModal = true;
+  }
+
+  /** Members matching the search query that aren't already assigned. */
+  filteredMembers(): TeamMember[] {
+    const q = this.assigneeQuery.trim().toLowerCase();
+    if (!q) return [];
+    return this.teamMembers.filter(
+      m => !this.form.assigneeIds.includes(m.id) &&
+           (m.name.toLowerCase().includes(q) || m.initials.toLowerCase().includes(q)),
+    );
+  }
+
+  selectedMembers(): TeamMember[] {
+    return this.teamMembers.filter(m => this.form.assigneeIds.includes(m.id));
+  }
+
+  addAssignee(id: string): void {
+    if (!this.form.assigneeIds.includes(id)) {
+      this.form.assigneeIds = [...this.form.assigneeIds, id];
+    }
+    this.assigneeQuery = '';
+  }
+
+  removeAssignee(id: string): void {
+    this.form.assigneeIds = this.form.assigneeIds.filter(x => x !== id);
+  }
+
+  isUnassigned(project: Project): boolean {
+    return project.members.length === 0 && project.moreMembers === 0;
+  }
+
+  canCreate(): boolean {
+    return this.form.title.trim().length > 0;
+  }
+
+  createProject(): void {
+    if (!this.canCreate()) return;
+    this.projectService.createProject({
+      title: this.form.title,
+      description: this.form.description,
+      priority: this.form.priority,
+      startDate: this.form.startDate,
+      dueDate: this.form.dueDate,
+      assigneeIds: this.form.assigneeIds,
+      tags: this.form.tagsInput.split(',').map(t => t.trim()).filter(Boolean),
+      color: this.form.color,
+    });
+    this.showModal = false;
+  }
+
+  private emptyForm() {
+    return {
+      title: '',
+      description: '',
+      priority: 'medium' as Project['priority'],
+      startDate: '',
+      dueDate: '',
+      assigneeIds: [] as string[],
+      tagsInput: '',
+      color: PROJECT_COLORS[0],
+    };
   }
 
   taskSummary(projectId: string): string {
@@ -285,14 +573,12 @@ export class ProjectsDashboardComponent implements OnInit {
     return '#006688';
   }
 
-  avatarColors(idx: number): string[] {
-    return [
-      AVATAR_COLORS[idx % AVATAR_COLORS.length],
-      AVATAR_COLORS[(idx + 1) % AVATAR_COLORS.length],
-    ];
+  avatarColor(idx: number): string {
+    return AVATAR_COLORS[idx % AVATAR_COLORS.length];
   }
 
-  overflowCount(idx: number): number {
-    return (idx % 3) + 1;
+  /** Resolves a card's avatar initials to a team member's profile photo, if any. */
+  avatarPhoto(initials: string): string | undefined {
+    return this.teamMembers.find(m => m.initials === initials)?.avatarUrl;
   }
 }
