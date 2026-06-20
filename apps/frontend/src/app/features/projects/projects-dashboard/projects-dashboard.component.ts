@@ -19,6 +19,10 @@ const STATUS_STYLE: Record<Task['status'], { label: string; bg: string; color: s
   selector: 'app-projects-dashboard',
   standalone: true,
   imports: [CommonModule, FormsModule],
+  styles: [`
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  `],
   template: `
     <div class="px-margin-page pt-stack-md pb-4">
 
@@ -228,44 +232,68 @@ const STATUS_STYLE: Record<Task['status'], { label: string; bg: string; color: s
             </div>
           </button>
 
-          <!-- Tasks (subtasks) -->
-          <div *ngIf="isExpanded(project.id)" class="border-t border-surface-container">
-            <div *ngFor="let task of tasksFor(project.id)"
-                 (click)="openKanban(project.id)"
-                 class="flex items-center gap-3 px-4 py-3 border-b border-surface-container last:border-b-0
-                        hover:bg-surface-container-low cursor-pointer transition-colors">
-              <span class="w-6 h-6 rounded flex items-center justify-center flex-shrink-0"
-                    [style.background]="typeOf(task).bg">
-                <span class="material-symbols-outlined text-[15px]" [style.color]="typeOf(task).color">{{ typeOf(task).icon }}</span>
-              </span>
-              <span class="flex-1 min-w-0 text-[14px] font-medium text-on-surface truncate"
-                    [class.line-through]="task.status === 'done'"
-                    [class.text-on-surface-variant]="task.status === 'done'">
-                {{ task.title }}
-              </span>
-              <span class="text-[10px] px-2 py-0.5 rounded-full font-bold flex-shrink-0"
-                    [style.background]="statusOf(task).bg" [style.color]="statusOf(task).color">
-                {{ statusOf(task).label }}
-              </span>
-              <span class="w-6 h-6 rounded-full overflow-hidden flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0"
-                    *ngIf="memberOf(task) as m; else taskUnassigned" [style.background]="m.color" [title]="m.name">
-                <img *ngIf="m.avatarUrl; else tmi" [src]="m.avatarUrl" [alt]="m.name" class="w-full h-full object-cover" />
-                <ng-template #tmi>{{ m.initials }}</ng-template>
-              </span>
-              <ng-template #taskUnassigned>
-                <span class="w-6 h-6 rounded-full bg-surface-container flex items-center justify-center text-on-surface-variant flex-shrink-0" title="Unassigned">
-                  <span class="material-symbols-outlined text-[14px]">person</span>
-                </span>
-              </ng-template>
-            </div>
+          <!-- Mini board: Open | In Progress | Closed columns (Jira-style) -->
+          <div *ngIf="isExpanded(project.id)" class="border-t border-surface-container bg-surface-container-low/40 p-4">
+            <div class="flex gap-3 overflow-x-auto no-scrollbar pb-1">
 
-            <div *ngIf="!tasksFor(project.id).length" class="px-4 py-5 text-center text-[13px] text-on-surface-variant">
-              No tasks yet.
+              <div *ngFor="let group of taskGroups(project.id)" class="min-w-[220px] w-[220px] flex-shrink-0">
+                <!-- Column header -->
+                <div class="flex items-center gap-2 mb-3 px-1">
+                  <span class="w-2 h-2 rounded-full" [style.background]="group.color"></span>
+                  <span class="text-[12px] font-bold uppercase tracking-wider" [style.color]="group.color">{{ group.label }}</span>
+                  <span class="text-[11px] font-bold text-on-surface-variant bg-surface-container px-1.5 rounded-full">{{ group.tasks.length }}</span>
+                </div>
+
+                <!-- Cards -->
+                <div class="flex flex-col gap-2">
+                  <div *ngFor="let task of group.tasks"
+                       (click)="openKanban(project.id)"
+                       class="bg-white p-3 rounded-xl cursor-pointer active:scale-95 transition-transform"
+                       style="box-shadow:0 8px 24px rgba(94,67,251,0.04);"
+                       [class.border-l-4]="task.status === 'in-progress'"
+                       [class.border-primary]="task.status === 'in-progress'">
+                    <div class="mb-2">
+                      <span class="text-[10px] px-2 py-0.5 rounded font-bold inline-flex items-center gap-1"
+                            [style.background]="typeOf(task).bg" [style.color]="typeOf(task).color">
+                        <span class="material-symbols-outlined text-[12px]">{{ typeOf(task).icon }}</span>{{ typeOf(task).short }}
+                      </span>
+                    </div>
+                    <h4 class="text-[13px] font-semibold text-on-surface mb-3 leading-tight"
+                        [class.line-through]="task.status === 'done'"
+                        [class.text-on-surface-variant]="task.status === 'done'">
+                      {{ task.title }}
+                    </h4>
+                    <div class="flex items-center justify-between">
+                      <span class="w-6 h-6 rounded-full overflow-hidden flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0"
+                            *ngIf="memberOf(task) as m; else taskUnassigned" [style.background]="m.color" [title]="m.name">
+                        <img *ngIf="m.avatarUrl; else tmi" [src]="m.avatarUrl" [alt]="m.name" class="w-full h-full object-cover" />
+                        <ng-template #tmi>{{ m.initials }}</ng-template>
+                      </span>
+                      <ng-template #taskUnassigned>
+                        <span class="w-6 h-6 rounded-full bg-surface-container flex items-center justify-center text-on-surface-variant flex-shrink-0" title="Unassigned">
+                          <span class="material-symbols-outlined text-[14px]">person</span>
+                        </span>
+                      </ng-template>
+                      <span class="text-[11px] text-on-surface-variant font-medium flex items-center gap-1">
+                        <span class="material-symbols-outlined text-[13px]">schedule</span>{{ task.estimateHours }}h
+                      </span>
+                    </div>
+                  </div>
+
+                  <!-- Empty column -->
+                  <div *ngIf="!group.tasks.length"
+                       class="text-[12px] text-on-surface-variant italic py-4 text-center rounded-xl"
+                       style="border:1.5px dashed rgba(200,196,217,0.6);">
+                    No tasks
+                  </div>
+                </div>
+              </div>
+
             </div>
 
             <button (click)="openKanban(project.id)"
-                    class="w-full py-3 text-[13px] font-bold text-primary flex items-center justify-center gap-1 hover:bg-surface-container-low transition-colors">
-              Open board <span class="material-symbols-outlined text-[16px]">arrow_forward</span>
+                    class="w-full mt-3 py-2.5 text-[13px] font-bold text-primary flex items-center justify-center gap-1 hover:bg-surface-container-low rounded-xl transition-colors">
+              Open full board <span class="material-symbols-outlined text-[16px]">arrow_forward</span>
             </button>
           </div>
         </div>
@@ -459,9 +487,14 @@ export class ProjectsDashboardComponent implements OnInit {
   expandAll(): void { this.expandedProjects.set(new Set(this.projects().map(p => p.id))); }
   collapseAll(): void { this.expandedProjects.set(new Set<string>()); }
 
-  tasksFor(projectId: string): Task[] {
+  /** Tasks grouped into Open / In Progress / Closed sections for the board view. */
+  taskGroups(projectId: string): { label: string; bg: string; color: string; tasks: Task[] }[] {
     const k = this.projectService.getKanbanByProject(projectId);
-    return [...k.todo, ...k.inProgress, ...k.done];
+    return [
+      { ...STATUS_STYLE['todo'], tasks: k.todo },
+      { ...STATUS_STYLE['in-progress'], tasks: k.inProgress },
+      { ...STATUS_STYLE['done'], tasks: k.done },
+    ];
   }
 
   typeOf(task: Task): TaskTypeDef { return typeInfo(task); }
