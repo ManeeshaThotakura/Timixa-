@@ -3,17 +3,11 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { ProjectService } from '../../../core/services/project.service';
-import { Project, TeamMember, Task } from '../../../core/models/project.model';
-import { typeInfo, TaskTypeDef } from '../task-meta';
+import { Project, TeamMember, Issue } from '../../../core/models/project.model';
+import { issueTypeInfo, IssueTypeDef, statusInfo, STATUSES } from '../task-meta';
 
 const AVATAR_COLORS = ['#451de3', '#006688', '#4b4f52', '#00c1fd', '#ba1a1a'];
 const PROJECT_COLORS = ['#451de3', '#00c1fd', '#006688', '#15803d', '#ba1a1a', '#4b4f52'];
-
-const STATUS_STYLE: Record<Task['status'], { label: string; bg: string; color: string }> = {
-  'todo':        { label: 'Open',        bg: '#e2e2e5', color: '#43474a' },
-  'in-progress': { label: 'In Progress', bg: '#e4dfff', color: '#3c03dd' },
-  'done':        { label: 'Closed',      bg: '#dcfce7', color: '#16a34a' },
-};
 
 @Component({
   selector: 'app-projects-dashboard',
@@ -53,62 +47,39 @@ const STATUS_STYLE: Record<Task['status'], { label: string; bg: string; color: s
             </button>
           </div>
         </div>
+
+        <!-- Quick nav -->
+        <div class="flex gap-2 mt-1">
+          <button (click)="goDashboard()"
+                  class="px-4 py-2 rounded-full flex items-center gap-2 font-semibold text-[12px] bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest transition-all">
+            <span class="material-symbols-outlined text-[18px]">dashboard</span>Dashboard
+          </button>
+          <button (click)="goMyWork()"
+                  class="px-4 py-2 rounded-full flex items-center gap-2 font-semibold text-[12px] bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest transition-all">
+            <span class="material-symbols-outlined text-[18px]">assignment_ind</span>My Work
+          </button>
+        </div>
       </section>
 
-      <!-- Stats Bento -->
-      <section class="grid grid-cols-2 gap-4 mb-stack-lg">
-
-        <!-- Active Projects — spans full width -->
-        <div class="col-span-2 p-6 rounded-[24px] border border-white/50 flex flex-col justify-between min-h-[140px]"
-             style="background:rgba(255,255,255,0.7); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
-                    box-shadow:0 8px 24px rgba(94,67,251,0.04);">
-          <div class="flex justify-between items-start">
-            <div class="w-10 h-10 rounded-full flex items-center justify-center"
-                 style="background:rgba(69,29,227,0.1);">
-              <span class="material-symbols-outlined text-primary">rocket_launch</span>
-            </div>
-            <span class="font-bold text-[24px] text-primary" style="font-family:Manrope;">
-              {{ stats().activeCount }}
-            </span>
-          </div>
-          <div>
-            <p class="text-[12px] font-semibold text-on-surface-variant uppercase tracking-wider">Active Projects</p>
-            <p class="text-[16px] text-primary font-semibold">+2 this week</p>
-          </div>
+      <!-- Stats strip (compact) -->
+      <section class="flex items-center gap-6 px-4 py-3 mb-stack-lg rounded-xl bg-surface-container-lowest border border-surface-container-high">
+        <div class="flex items-center gap-2">
+          <span class="material-symbols-outlined text-[18px] text-primary">rocket_launch</span>
+          <span class="font-bold text-[15px] text-on-surface" style="font-family:Manrope;">{{ stats().activeCount }}</span>
+          <span class="text-[12px] text-on-surface-variant">Active</span>
         </div>
-
-        <!-- Velocity -->
-        <div class="p-6 rounded-[24px] border border-white/50 flex flex-col justify-between"
-             style="background:rgba(255,255,255,0.7); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
-                    box-shadow:0 8px 24px rgba(94,67,251,0.04);">
-          <div class="w-10 h-10 rounded-full flex items-center justify-center"
-               style="background:rgba(0,193,253,0.2);">
-            <span class="material-symbols-outlined text-secondary">done_all</span>
-          </div>
-          <div>
-            <p class="font-bold text-[24px] text-on-surface" style="font-family:Manrope;">
-              {{ stats().velocity }}%
-            </p>
-            <p class="text-[12px] font-semibold text-on-surface-variant">Velocity</p>
-          </div>
+        <div class="w-px h-5 bg-surface-container-high"></div>
+        <div class="flex items-center gap-2">
+          <span class="material-symbols-outlined text-[18px] text-secondary">done_all</span>
+          <span class="font-bold text-[15px] text-on-surface" style="font-family:Manrope;">{{ stats().velocity }}%</span>
+          <span class="text-[12px] text-on-surface-variant">Velocity</span>
         </div>
-
-        <!-- Due Soon -->
-        <div class="p-6 rounded-[24px] border border-white/50 flex flex-col justify-between"
-             style="background:rgba(255,255,255,0.7); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
-                    box-shadow:0 8px 24px rgba(94,67,251,0.04);">
-          <div class="w-10 h-10 rounded-full flex items-center justify-center"
-               style="background:rgba(255,218,214,0.5);">
-            <span class="material-symbols-outlined text-error">schedule</span>
-          </div>
-          <div>
-            <p class="font-bold text-[24px] text-on-surface" style="font-family:Manrope;">
-              {{ stats().dueSoonCount }}
-            </p>
-            <p class="text-[12px] font-semibold text-on-surface-variant">Due Soon</p>
-          </div>
+        <div class="w-px h-5 bg-surface-container-high"></div>
+        <div class="flex items-center gap-2">
+          <span class="material-symbols-outlined text-[18px] text-error">schedule</span>
+          <span class="font-bold text-[15px] text-on-surface" style="font-family:Manrope;">{{ stats().dueSoonCount }}</span>
+          <span class="text-[12px] text-on-surface-variant">Due Soon</span>
         </div>
-
       </section>
 
       <!-- Project Cards (List view) -->
@@ -247,7 +218,7 @@ const STATUS_STYLE: Record<Task['status'], { label: string; bg: string; color: s
                 <!-- Cards -->
                 <div class="flex flex-col gap-2">
                   <div *ngFor="let task of group.tasks"
-                       (click)="openKanban(project.id)"
+                       (click)="openIssue(task)"
                        class="bg-white p-3 rounded-xl cursor-pointer active:scale-95 transition-transform"
                        style="box-shadow:0 8px 24px rgba(94,67,251,0.04);"
                        [class.border-l-4]="task.status === 'in-progress'"
@@ -274,8 +245,8 @@ const STATUS_STYLE: Record<Task['status'], { label: string; bg: string; color: s
                           <span class="material-symbols-outlined text-[14px]">person</span>
                         </span>
                       </ng-template>
-                      <span class="text-[11px] text-on-surface-variant font-medium flex items-center gap-1">
-                        <span class="material-symbols-outlined text-[13px]">schedule</span>{{ task.estimateHours }}h
+                      <span *ngIf="task.storyPoints != null" class="text-[11px] font-bold text-on-surface-variant bg-surface-container px-2 py-0.5 rounded-full">
+                        {{ task.storyPoints }} pts
                       </span>
                     </div>
                   </div>
@@ -470,7 +441,11 @@ export class ProjectsDashboardComponent implements OnInit {
 
   ngOnInit(): void { this.projectService.load(); }
 
+  goDashboard(): void { this.router.navigate(['/projects/dashboard']); }
+  goMyWork(): void { this.router.navigate(['/projects/my-work']); }
+
   openKanban(id: string): void { this.router.navigate(['/projects', id, 'board']); }
+  openIssue(issue: Issue): void { this.router.navigate(['/projects', issue.projectId, 'stories', issue.id]); }
 
   // ── Board view (expandable projects → tasks) ───────────────────────
   expandedProjects = signal<Set<string>>(new Set<string>());
@@ -487,20 +462,22 @@ export class ProjectsDashboardComponent implements OnInit {
   expandAll(): void { this.expandedProjects.set(new Set(this.projects().map(p => p.id))); }
   collapseAll(): void { this.expandedProjects.set(new Set<string>()); }
 
-  /** Tasks grouped into Open / In Progress / Closed sections for the board view. */
-  taskGroups(projectId: string): { label: string; bg: string; color: string; tasks: Task[] }[] {
-    const k = this.projectService.getKanbanByProject(projectId);
-    return [
-      { ...STATUS_STYLE['todo'], tasks: k.todo },
-      { ...STATUS_STYLE['in-progress'], tasks: k.inProgress },
-      { ...STATUS_STYLE['done'], tasks: k.done },
-    ];
+  /** Board issues grouped by the 5 FlowForge statuses for the mini-board view. */
+  taskGroups(projectId: string): { label: string; bg: string; color: string; tasks: Issue[] }[] {
+    const k = this.projectService.boardColumns(projectId);
+    const byId: Record<string, Issue[]> = {
+      backlog: k.backlog, todo: k.todo, 'in-progress': k.inProgress, done: k.done,
+    };
+    return STATUSES.map(s => ({ label: s.label, bg: s.bg, color: s.color, tasks: byId[s.id] }));
   }
 
-  typeOf(task: Task): TaskTypeDef { return typeInfo(task); }
-  statusOf(task: Task): { label: string; bg: string; color: string } { return STATUS_STYLE[task.status]; }
-  memberOf(task: Task): TeamMember | undefined {
-    return this.teamMembers.find(m => m.id === task.assigneeId);
+  typeOf(issue: Issue): IssueTypeDef { return issueTypeInfo(issue.type); }
+  statusOf(issue: Issue): { label: string; bg: string; color: string } {
+    const s = statusInfo(issue.status);
+    return { label: s.label, bg: s.bg, color: s.color };
+  }
+  memberOf(issue: Issue): TeamMember | undefined {
+    return this.teamMembers.find(m => m.id === issue.assigneeId);
   }
 
   openCreate(): void {
@@ -571,9 +548,9 @@ export class ProjectsDashboardComponent implements OnInit {
   }
 
   taskSummary(projectId: string): string {
-    const k = this.projectService.getKanbanByProject(projectId);
+    const k = this.projectService.boardColumns(projectId);
     const total = k.todo.length + k.inProgress.length + k.done.length;
-    return total ? `${k.done.length}/${total} Tasks` : 'No tasks yet';
+    return total ? `${k.done.length}/${total} Issues` : 'No issues yet';
   }
 
   badgeLabel(project: Project): string {
