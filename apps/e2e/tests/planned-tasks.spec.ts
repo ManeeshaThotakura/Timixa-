@@ -93,6 +93,9 @@ test('unscheduled banner routes to schedule page', async ({ page }) => {
     title: 'Read', cadence: 'DAILY', needsTimeSlot: true,
   });
   await page.reload();
+  // The once-per-day unscheduled popup fires first — dismiss it.
+  await expect(page.getByTestId('unsched-prompt')).toBeVisible();
+  await page.getByTestId('unsched-prompt-dismiss').click();
   await expect(page.getByTestId('unscheduled-banner')).toBeVisible();
   await page.getByTestId('unscheduled-toggle').click();
   // Banner shows the task title in its expanded list.
@@ -100,6 +103,21 @@ test('unscheduled banner routes to schedule page', async ({ page }) => {
   // The "Open today's schedule" button routes to /schedule.
   await page.getByTestId('open-schedule').click();
   await expect(page).toHaveURL(/\/schedule$/);
+});
+
+test('unscheduled popup Schedule now routes to schedule and stays dismissed', async ({ page }) => {
+  await registerAndOnboard(page);
+  await createTaskViaApi(page, {
+    title: 'Read', cadence: 'DAILY', needsTimeSlot: true,
+  });
+  await page.reload();
+  await expect(page.getByTestId('unsched-prompt')).toBeVisible();
+  await page.getByTestId('unsched-prompt-open').click();
+  await expect(page).toHaveURL(/\/schedule$/);
+  // Back to dashboard: suppressed for the rest of the day.
+  await page.goto('/dashboard');
+  await expect(page.getByTestId('unscheduled-banner')).toBeVisible();
+  await expect(page.getByTestId('unsched-prompt')).toHaveCount(0);
 });
 
 test('New Task page redirects to day schedule for DAILY tasks', async ({ page }) => {
@@ -111,6 +129,9 @@ test('New Task page redirects to day schedule for DAILY tasks', async ({ page })
 
   // Task is persisted — visible on the dashboard's unscheduled banner after navigating back.
   await page.goto('/dashboard');
+  // Fresh session with an unscheduled task → the once-per-day popup fires; dismiss it.
+  await expect(page.getByTestId('unsched-prompt')).toBeVisible();
+  await page.getByTestId('unsched-prompt-dismiss').click();
   await expect(page.getByTestId('unscheduled-banner')).toBeVisible();
   await page.getByTestId('unscheduled-toggle').click();
   await expect(page.getByTestId('unscheduled-banner')).toContainText('Stretch');

@@ -96,6 +96,12 @@ public class GlobalExceptionHandler {
             .body(ErrorResponse.of("SEGMENT_NOT_FOUND", e.getMessage()));
     }
 
+    @ExceptionHandler(HabitNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleHabitNotFound(HabitNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+            .body(ErrorResponse.of("HABIT_NOT_FOUND", e.getMessage()));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleAny(Exception e) {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)

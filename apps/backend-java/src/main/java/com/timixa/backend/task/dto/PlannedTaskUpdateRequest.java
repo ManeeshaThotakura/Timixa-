@@ -21,5 +21,7 @@ public record PlannedTaskUpdateRequest(
     @Min(1) Integer minTimeMinutes,
     @Min(1) Integer maxTimeMinutes,
     @Min(1) Integer minCount,
-    @Min(1) Integer maxCount
+    @Min(1) Integer maxCount,
+    Boolean notifyAtStart,
+    Boolean notifyAtEnd
 ) {}

@@ -60,7 +60,6 @@ export class PlannedTaskService {
   });
 
   readonly upcomingToday = computed<PlannedTask[]>(() => {
-    const now = hhmmNow(this._now());
     const current = this.nowTask();
     return this._tasks()
       .filter(
@@ -68,13 +67,19 @@ export class PlannedTaskService {
           !t.completedToday &&
           t !== current &&
           t.startTime &&
-          t.startTime >= now,
+          t.endTime,
       )
       .sort((a, b) => (a.startTime! < b.startTime! ? -1 : 1));
   });
 
+  readonly nowHHmm = computed<string>(() => hhmmNow(this._now()));
+
   readonly unscheduledToday = computed<PlannedTask[]>(() =>
     this._tasks().filter(t => !t.completedToday && t.needsTimeSlot && !t.startTime),
+  );
+
+  readonly flexibleToday = computed<PlannedTask[]>(() =>
+    this._tasks().filter(t => !t.completedToday && !t.needsTimeSlot),
   );
 
   readonly completedToday = computed<PlannedTask[]>(() =>
@@ -87,6 +92,10 @@ export class PlannedTaskService {
 
   loadForDate(date: string): Observable<PlannedTask[]> {
     return this.http.get<PlannedTask[]>(`${this.base}?date=${date}`);
+  }
+
+  loadAll(): Observable<PlannedTask[]> {
+    return this.http.get<PlannedTask[]>(this.base);
   }
 
   loadForWeek(weekStart: string): Observable<Map<string, PlannedTask[]>> {
@@ -118,6 +127,12 @@ export class PlannedTaskService {
   complete(id: string, date: string = todayIso()): Observable<PlannedTask> {
     return this.http
       .post<PlannedTask>(`${this.base}/${id}/completions`, { date })
+      .pipe(tap(updated => this._tasks.update(list => list.map(t => (t.id === id ? updated : t)))));
+  }
+
+  increment(id: string, delta: number = 1, date: string = todayIso()): Observable<PlannedTask> {
+    return this.http
+      .post<PlannedTask>(`${this.base}/${id}/increment`, { date, delta })
       .pipe(tap(updated => this._tasks.update(list => list.map(t => (t.id === id ? updated : t)))));
   }
 

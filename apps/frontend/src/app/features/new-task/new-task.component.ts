@@ -511,6 +511,8 @@ export class NewTaskComponent {
       maxTimeMinutes,
       minCount,
       maxCount,
+      notifyAtStart: this.notifyAtStart(),
+      notifyAtEnd: this.notifyAtEnd(),
     };
   }
 
