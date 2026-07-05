@@ -24,13 +24,19 @@ public record PlannedTaskResponse(
     Integer minCount,
     Integer maxCount,
     List<PlannedTaskExceptionResponse> exceptions,
+    List<PlannedTaskSegmentResponse> segmentsForDate,
     boolean completedToday,
+    int currentCount,
+    boolean notifyAtStart,
+    boolean notifyAtEnd,
     Instant createdAt, Instant updatedAt
 ) {
     public static PlannedTaskResponse from(
             PlannedTask t,
             List<PlannedTaskExceptionResponse> exceptions,
-            boolean completedToday) {
+            List<PlannedTaskSegmentResponse> segmentsForDate,
+            boolean completedToday,
+            int currentCount) {
         return new PlannedTaskResponse(
             t.getId(), t.getUserId(), t.getTitle(), t.getGoal(), t.getColor(),
             t.getCadence(), t.isNeedsTimeSlot(),
@@ -43,8 +49,27 @@ public record PlannedTaskResponse(
             t.getMinCount(),
             t.getMaxCount(),
             exceptions == null ? List.of() : exceptions,
+            segmentsForDate == null ? List.of() : segmentsForDate,
             completedToday,
+            currentCount,
+            t.isNotifyAtStart(),
+            t.isNotifyAtEnd(),
             t.getCreatedAt(), t.getUpdatedAt()
         );
+    }
+
+    public static PlannedTaskResponse from(
+            PlannedTask t,
+            List<PlannedTaskExceptionResponse> exceptions,
+            List<PlannedTaskSegmentResponse> segmentsForDate,
+            boolean completedToday) {
+        return from(t, exceptions, segmentsForDate, completedToday, completedToday ? Math.max(1, t.getMinCount() == null ? 1 : t.getMinCount()) : 0);
+    }
+
+    public static PlannedTaskResponse from(
+            PlannedTask t,
+            List<PlannedTaskExceptionResponse> exceptions,
+            boolean completedToday) {
+        return from(t, exceptions, List.of(), completedToday);
     }
 }

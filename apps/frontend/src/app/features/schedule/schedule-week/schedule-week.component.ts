@@ -2,12 +2,28 @@ import { Component, OnInit, OnDestroy, inject, signal, computed, NgZone, ViewChi
 import { CommonModule, DOCUMENT } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
+import { Observable, of, switchMap } from 'rxjs';
 import { PlannedTaskService } from '../../../core/services/planned-task.service';
+import {
+  FrequencyValidatorService,
+  FrequencyWarning,
+} from '../../../core/services/frequency-validator.service';
 import { PlannedTask, Weekday } from '../../../core/models/planned-task.model';
 import { ExceptionPopupComponent } from '../exception-popup.component';
+import {
+  ScheduleSlotPopupComponent,
+  SlotPopupConfirm,
+} from '../schedule-slot-popup.component';
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i); // 00:00 – 23:00
 const DAY_ABBR = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+
+// A bar in the week grid is either the task's template times (segmentId=null)
+// or one of its per-date segment overrides.
+interface WeekBar extends PlannedTask {
+  _segmentId: string | null;
+  _dateStr: string;
+}
 
 // Map JS day-of-week (0=Sun) to Weekday enum value
 const JS_DAY_TO_WEEKDAY: Weekday[] = [
@@ -17,7 +33,7 @@ const JS_DAY_TO_WEEKDAY: Weekday[] = [
 @Component({
   selector: 'app-schedule-week',
   standalone: true,
-  imports: [CommonModule, FormsModule, ExceptionPopupComponent],
+  imports: [CommonModule, FormsModule, ExceptionPopupComponent, ScheduleSlotPopupComponent],
   template: `
     <!-- Segmented Control -->
     <div class="px-margin-page mt-stack-md">
@@ -30,6 +46,24 @@ const JS_DAY_TO_WEEKDAY: Weekday[] = [
                   : 'font-medium text-on-surface-variant hover:text-on-surface'">
           {{ v.label }}
         </button>
+      </div>
+    </div>
+
+    <!-- Frequency-rule warnings -->
+    <div *ngIf="frequencyWarnings().length > 0" class="px-margin-page mt-stack-md" data-testid="frequency-warnings">
+      <div *ngFor="let w of frequencyWarnings()"
+           class="rounded-2xl p-3 flex items-center gap-2.5 border mb-2"
+           style="background:rgba(255,179,0,0.10); border-color:rgba(255,179,0,0.35);"
+           [attr.data-testid]="'freq-warn-' + w.taskId">
+        <span class="material-symbols-outlined text-[20px] flex-shrink-0" style="color:#b76d00;">schedule</span>
+        <div class="min-w-0 flex-1">
+          <p class="text-[13px] font-bold" style="color:#7a4900;">
+            {{ w.title }} — {{ w.actual }} planned {{ w.period }}, target {{ w.expected }}
+          </p>
+          <p class="text-[11px] text-on-surface-variant leading-tight">
+            You added {{ w.actual - w.expected }} extra session{{ w.actual - w.expected === 1 ? '' : 's' }} via exceptions
+          </p>
+        </div>
       </div>
     </div>
 
@@ -49,8 +83,9 @@ const JS_DAY_TO_WEEKDAY: Weekday[] = [
       </div>
     </div>
 
-    <!-- Unplanned Tasks (collapsible) -->
-    <section class="px-margin-page mt-stack-md">
+    <!-- Unplanned Tasks (collapsible, pinned to top while grid scrolls) -->
+    <section class="px-margin-page mt-stack-md sticky top-0 z-30 pt-2 pb-2"
+             style="backdrop-filter:saturate(140%) blur(8px); -webkit-backdrop-filter:saturate(140%) blur(8px); background-color: rgba(248, 250, 252, 0.92);">
       <!-- Collapsed header -->
       <div class="bg-surface-container-lowest rounded-xl p-4 flex items-center justify-between cursor-pointer border border-slate-50"
            style="box-shadow:0 8px 24px rgba(94,67,251,0.04);"
@@ -93,7 +128,54 @@ const JS_DAY_TO_WEEKDAY: Weekday[] = [
               <div class="w-2 h-2 rounded-full bg-error animate-pulse"></div>
             </div>
             <p class="font-semibold text-[13px] text-on-surface mb-1 truncate">{{ task.title }}</p>
+            <p *ngIf="remainingMinutes(task) > 0"
+               class="text-[10px] font-bold text-primary uppercase tracking-wider mb-1">
+              {{ remainingMinutes(task) }} min remaining
+            </p>
             <p class="text-[10px] text-on-surface-variant">{{ task.cadence }}</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Weekly tasks: pending days at a glance -->
+    <section *ngIf="weeklyPendingRows().length > 0"
+             class="px-margin-page mt-stack-md"
+             data-testid="weekly-pending">
+      <div class="bg-surface-container-lowest rounded-2xl border border-slate-50"
+           style="box-shadow:0 8px 24px rgba(94,67,251,0.04);">
+        <div class="px-4 pt-3 pb-2">
+          <p class="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Weekly tasks</p>
+        </div>
+        <div class="px-4 pb-3 flex flex-col gap-2">
+          <div *ngFor="let row of weeklyPendingRows()"
+               class="flex items-center gap-3"
+               [attr.data-testid]="'weekly-row-' + row.taskId">
+            <span class="w-2 h-2 rounded-full flex-shrink-0" [style.background]="row.color"></span>
+            <p class="text-[12px] font-semibold text-on-surface flex-1 min-w-0 truncate">{{ row.title }}</p>
+            <div class="flex items-center gap-1 flex-shrink-0">
+              <div *ngFor="let d of row.days"
+                   class="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold"
+                   [attr.data-status]="d.status"
+                   [style.background]="d.status === 'green'
+                     ? 'rgba(46,125,50,0.18)'
+                     : d.status === 'red'
+                       ? 'rgba(186,26,26,0.18)'
+                       : d.status === 'yellow'
+                         ? 'rgba(255,179,0,0.22)'
+                         : 'transparent'"
+                   [style.color]="d.status === 'green'
+                     ? '#2e7d32'
+                     : d.status === 'red'
+                       ? '#ba1a1a'
+                       : d.status === 'yellow'
+                         ? '#b76d00'
+                         : 'rgba(120,117,136,0.45)'"
+                   [style.outline]="d.isToday ? '1.5px solid #451de3' : 'none'"
+                   [style.outlineOffset]="d.isToday ? '1px' : '0'">
+                {{ d.label }}
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -136,7 +218,7 @@ const JS_DAY_TO_WEEKDAY: Weekday[] = [
           <div *ngFor="let day of weekDays; trackBy: trackByDateStr"
                class="flex-shrink-0 text-center py-2 border-r border-slate-100"
                [style.width.px]="COL_W"
-               [style.background]="isToday(day.date) ? 'rgba(94,67,251,0.05)' : ''">
+               [style.background]="isToday(day.date) ? 'rgba(94,67,251,0.08)' : ''">
             <p class="text-[10px] font-bold uppercase tracking-widest"
                [style.color]="isToday(day.date) ? '#451de3' : '#787588'">
               {{ day.abbr }}
@@ -177,12 +259,13 @@ const JS_DAY_TO_WEEKDAY: Weekday[] = [
               <span class="text-[9px] font-bold text-primary">Drop</span>
             </div>
 
-            <!-- Events in this cell (same layout as day view: drag + title + time + resize) -->
+            <!-- Events in this cell: vertical stack — title above, time below. -->
             <!-- z-index keeps multi-hour events clickable beyond their parent cell — without it,
                  cells in the rows below cover the overflow region and steal pointer events. -->
             <div *ngFor="let evt of getEventsForCell(hour, day.dateStr); trackBy: trackByEventId"
                  [attr.data-event-id]="evt.id"
-                 class="absolute rounded-md pl-1 pr-1.5 flex items-center gap-1 border-l-2 overflow-hidden cursor-pointer select-none transition-shadow"
+                 [attr.title]="evt.title + ' · ' + (evt.startTime || '') + '–' + (evt.endTime || '')"
+                 class="absolute rounded-md px-1.5 py-0.5 flex flex-col justify-center gap-0.5 border-l-2 overflow-hidden cursor-pointer select-none transition-shadow"
                  [class.cursor-grab]="selectedEventId() === evt.id"
                  [class.active:cursor-grabbing]="selectedEventId() === evt.id"
                  style="touch-action: none;"
@@ -196,25 +279,21 @@ const JS_DAY_TO_WEEKDAY: Weekday[] = [
                  [style.borderLeftColor]="getEventBorder(evt.color)"
                  (mousedown)="onEventDown($event, evt)"
                  (touchstart)="onEventDown($event, evt)">
-              <span class="material-symbols-outlined text-[13px] opacity-70 flex-shrink-0 -ml-1 relative z-10 leading-none pointer-events-none"
-                    [style.color]="getEventBorder(evt.color)">
-                drag_indicator
-              </span>
-              <span class="text-[10px] font-bold truncate flex-1 leading-tight pointer-events-none"
-                    [style.color]="getEventBorder(evt.color)">
+              <span class="text-[11px] font-bold truncate leading-tight text-on-surface pointer-events-none">
                 {{ evt.title }}
               </span>
-              <span class="text-[9px] font-medium flex-shrink-0 leading-tight whitespace-nowrap pointer-events-none"
+              <span *ngIf="(getDayLayout(day.dateStr).get(evt.id)?.count ?? 1) <= 1"
+                    class="text-[9px] font-medium leading-tight truncate opacity-80 pointer-events-none"
                     [style.color]="getEventBorder(evt.color)">
                 {{ resizingEventId() === evt.id ? resizingTimeLabel() : (evt.startTime || '') + '–' + (evt.endTime || '') }}
               </span>
-              <!-- Resize handle (off the left edge so it never overlaps the drag indicator) -->
-              <div class="absolute bottom-0 left-8 right-1 h-3 flex items-center justify-center cursor-ns-resize hover:bg-primary/10 transition-colors"
+              <!-- Resize handle: small centered pill so it doesn't steal taps on title/time text -->
+              <div class="absolute bottom-0 left-1/2 -translate-x-1/2 w-10 h-2.5 flex items-center justify-center cursor-ns-resize hover:bg-primary/10 rounded-t-md transition-colors"
                    data-resize-handle
                    style="touch-action: none;"
                    (mousedown)="onResizeStart($event, evt)"
                    (touchstart)="onResizeStart($event, evt)">
-                <div class="w-5 h-0.5 rounded-full bg-on-surface-variant/30"></div>
+                <div class="w-5 h-0.5 rounded-full bg-on-surface-variant/40"></div>
               </div>
             </div>
           </div>
@@ -240,10 +319,25 @@ const JS_DAY_TO_WEEKDAY: Weekday[] = [
     </div>
 
     <!-- FAB -->
-    <button class="fixed bottom-24 right-6 w-14 h-14 rounded-full flex items-center justify-center text-white active:scale-90 transition-transform z-50"
-            style="background:linear-gradient(135deg,#5e43fb,#00c1fd); box-shadow:0 8px 24px rgba(94,67,251,0.3);">
+    <button type="button"
+            (click)="openSlotPopup()"
+            class="fixed bottom-24 right-6 w-14 h-14 rounded-full flex items-center justify-center text-white active:scale-90 transition-transform z-50"
+            style="background:linear-gradient(135deg,#5e43fb,#00c1fd); box-shadow:0 8px 24px rgba(94,67,251,0.3);"
+            data-testid="schedule-fab">
       <span class="material-symbols-outlined text-2xl">add</span>
     </button>
+
+    <!-- Schedule a slot popup -->
+    <app-schedule-slot-popup
+      *ngIf="slotPopupOpen()"
+      [tasks]="allTasks()"
+      [defaultDate]="defaultPopupDate()"
+      [error]="slotPopupError()"
+      [busy]="slotPopupBusy()"
+      (close)="closeSlotPopup()"
+      (confirm)="onSlotConfirm($event)"
+      (newTask)="goToNewTask()">
+    </app-schedule-slot-popup>
 
     <!-- Edit schedule modal (long-press) -->
     <div *ngIf="editingEvent()"
@@ -307,16 +401,32 @@ const JS_DAY_TO_WEEKDAY: Weekday[] = [
       (yes)="onPopupYes()"
       (no)="onPopupNo()">
     </app-exception-popup>
+
+    <!-- Delete bin -->
+    <div *ngIf="movingEventId() !== null"
+         class="fixed inset-x-0 bottom-28 z-50 flex justify-center pointer-events-none"
+         data-testid="delete-bin-wrap">
+      <div data-bin
+           data-testid="delete-bin"
+           class="pointer-events-auto rounded-full px-6 py-4 shadow-card flex items-center gap-2 transition-transform duration-150"
+           [class.scale-110]="binArmed()"
+           [style.background]="binArmed() ? '#ba1a1a' : 'rgba(186,26,26,0.85)'"
+           [style.color]="'#fff'">
+        <span class="material-symbols-outlined">delete</span>
+        <span class="font-semibold text-[14px]">{{ binArmed() ? 'Release to delete' : 'Drop to delete' }}</span>
+      </div>
+    </div>
   `,
 })
 export class ScheduleWeekComponent implements OnInit, OnDestroy {
   router = inject(Router);
   private plannedTasks = inject(PlannedTaskService);
+  private freqValidator = inject(FrequencyValidatorService);
   private zone = inject(NgZone);
   private doc = inject(DOCUMENT);
 
   // Zoom: 1.0 = 100% (COL_W=110, ROW_H=64). Range 0.6 — 2.0.
-  private readonly BASE_COL_W = 110;
+  private readonly BASE_COL_W = 128;
   private readonly BASE_ROW_H = 64;
   private zoomFactor = 1;
   get COL_W(): number { return Math.round(this.BASE_COL_W * this.zoomFactor); }
@@ -350,13 +460,88 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
     const all: PlannedTask[] = [];
     this.tasksByDay().forEach(list => {
       for (const t of list) {
-        if (t.needsTimeSlot && !t.startTime && !all.some(x => x.id === t.id)) {
+        if (t.cadence === 'DAILY') continue;
+        if (!t.needsTimeSlot) continue;
+        if (all.some(x => x.id === t.id)) continue;
+        const scheduled = this.scheduledMinutesOnDate(t);
+        if (scheduled === 0 || (t.minTimeMinutes ?? 0) > scheduled) {
           all.push(t);
         }
       }
     });
     return all;
   });
+
+  frequencyWarnings = computed<FrequencyWarning[]>(() => {
+    const dedup = new Map<string, PlannedTask>();
+    this.tasksByDay().forEach(list => list.forEach(t => dedup.set(t.id, t)));
+    const all = Array.from(dedup.values());
+    return [
+      ...this.freqValidator.validateForWeek(all, this.weekStart),
+      ...this.freqValidator.validateForMonth(all, this.weekStart),
+    ];
+  });
+
+  weeklyPendingRows = computed(() => {
+    const labels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+    const weekdayNames: Weekday[] = [
+      'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY',
+    ];
+    const todayIso = this.isoOf(new Date());
+    const weekDates: { dateStr: string; label: string; weekday: Weekday; isToday: boolean }[] = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(this.weekStart);
+      d.setDate(this.weekStart.getDate() + i);
+      const ds = this.isoOf(d);
+      weekDates.push({
+        dateStr: ds, label: labels[i], weekday: weekdayNames[i],
+        isToday: ds === todayIso,
+      });
+    }
+    const byTask = new Map<string, { task: PlannedTask; perDate: Map<string, PlannedTask> }>();
+    this.tasksByDay().forEach((list, dateStr) => {
+      for (const t of list) {
+        if (t.cadence !== 'WEEKLY') continue;
+        const entry = byTask.get(t.id) ?? { task: t, perDate: new Map<string, PlannedTask>() };
+        entry.perDate.set(dateStr, t);
+        byTask.set(t.id, entry);
+      }
+    });
+    return Array.from(byTask.values()).map(({ task, perDate }) => ({
+      taskId: task.id,
+      title: task.title,
+      color: task.color,
+      days: weekDates.map(d => {
+        const entry = perDate.get(d.dateStr);
+        const applies = !!entry;
+        const isPlanned = task.weekdays?.includes(d.weekday) ?? false;
+        const hasSlot = !!entry && (!!entry.startTime || (entry.segmentsForDate?.length ?? 0) > 0);
+        let status: 'green' | 'red' | 'yellow' | 'faded';
+        if (isPlanned && hasSlot) status = 'green';
+        else if (isPlanned && !hasSlot) status = 'red';
+        else if (!isPlanned && applies && hasSlot) status = 'yellow';
+        else status = 'faded';
+        return { label: d.label, status, isToday: d.isToday };
+      }),
+    }));
+  });
+
+  private isoOf(d: Date): string {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  scheduledMinutesOnDate(t: PlannedTask): number {
+    const segs = t.segmentsForDate ?? [];
+    if (segs.length > 0) {
+      return segs.reduce((sum, s) => sum + this.diffMinutes(s.startTime, s.endTime), 0);
+    }
+    if (t.startTime && t.endTime) return this.diffMinutes(t.startTime, t.endTime);
+    return 0;
+  }
+
+  remainingMinutes(t: PlannedTask): number {
+    return Math.max(0, (t.minTimeMinutes ?? 0) - this.scheduledMinutesOnDate(t));
+  }
 
   draggingTask  = signal<PlannedTask | null>(null);
   dragOverHour  = signal<number | null>(null);
@@ -379,6 +564,13 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
     hoverDate: string | null;
     ghost: HTMLElement | null;
   } | null = null;
+  binArmed = signal(false);
+  private moveOverBin = false;
+
+  slotPopupOpen = signal(false);
+  slotPopupError = signal<string | null>(null);
+  slotPopupBusy = signal(false);
+  allTasks = signal<PlannedTask[]>([]);
   movingEventId = signal<string | null>(null);
   selectedEventId = signal<string | null>(null);
   private readonly boundMoveTrack = (e: MouseEvent | TouchEvent) => this.onMoveTrack(e);
@@ -431,7 +623,7 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
         abbr: DAY_ABBR[d.getDay()],
         day: d.getDate(),
         date: d,
-        dateStr: d.toISOString().split('T')[0],
+        dateStr: this.isoOf(d),
       };
     });
   }
@@ -460,15 +652,17 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
 
   // Computed buckets for the grid — split by (dateStr, hour) key
   private allEventsByCell = computed(() => {
-    const byCell = new Map<string, PlannedTask[]>();
+    const byCell = new Map<string, WeekBar[]>();
     this.tasksByDay().forEach((list, dateStr) => {
       for (const t of list) {
-        if (!t.startTime) continue;
-        const hour = parseInt(t.startTime.split(':')[0], 10);
-        const key = `${dateStr}#${hour}`;
-        let bucket = byCell.get(key);
-        if (!bucket) { bucket = []; byCell.set(key, bucket); }
-        bucket.push(t);
+        const bars = this.barsForTaskOnDate(t, dateStr);
+        for (const bar of bars) {
+          const hour = parseInt(bar.startTime!.split(':')[0], 10);
+          const key = `${dateStr}#${hour}`;
+          let bucket = byCell.get(key);
+          if (!bucket) { bucket = []; byCell.set(key, bucket); }
+          bucket.push(bar);
+        }
       }
     });
     return byCell;
@@ -477,11 +671,26 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
   private allLayouts = computed(() => {
     const layouts = new Map<string, Map<string, { col: number; count: number }>>();
     this.tasksByDay().forEach((list, dateStr) => {
-      const scheduled = list.filter(t => !!t.startTime && !!t.endTime);
-      layouts.set(dateStr, this.computeLayout(scheduled));
+      const bars: PlannedTask[] = [];
+      for (const t of list) bars.push(...this.barsForTaskOnDate(t, dateStr));
+      layouts.set(dateStr, this.computeLayout(bars));
     });
     return layouts;
   });
+
+  private barsForTaskOnDate(t: PlannedTask, dateStr: string): WeekBar[] {
+    const segs = t.segmentsForDate ?? [];
+    if (segs.length > 0) {
+      return segs.map(s => ({
+        ...t, _segmentId: s.id, _dateStr: dateStr,
+        startTime: s.startTime, endTime: s.endTime,
+      }));
+    }
+    if (t.startTime && t.endTime) {
+      return [{ ...t, _segmentId: null, _dateStr: dateStr }];
+    }
+    return [];
+  }
 
   ngOnInit(): void { this.reload(); }
 
@@ -498,7 +707,7 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
   }
 
   private weekStartIso(): string {
-    return this.weekStart.toISOString().split('T')[0];
+    return this.isoOf(this.weekStart);
   }
 
   private reload(): void {
@@ -513,11 +722,11 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
     return `${h.toString().padStart(2, '0')}:00`;
   }
 
-  getEventsForCell(hour: number, dateStr: string): PlannedTask[] {
+  getEventsForCell(hour: number, dateStr: string): WeekBar[] {
     return this.allEventsByCell().get(`${dateStr}#${hour}`) ?? [];
   }
 
-  trackByEventId(_i: number, evt: PlannedTask): string { return evt.id; }
+  trackByEventId(_i: number, evt: WeekBar): string { return evt._segmentId ?? evt.id; }
   trackByDateStr(_i: number, day: { dateStr: string }): string { return day.dateStr; }
   trackByHour(_i: number, hour: number): number { return hour; }
 
@@ -752,55 +961,66 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
 
   private scheduleAt(task: PlannedTask, hour: number, dateStr: string): void {
     const start = `${hour.toString().padStart(2, '0')}:00`;
-    // Default duration: minTimeMinutes if set, otherwise 15 min (count-only or unconstrained tasks).
-    const minutes = task.minTimeMinutes ?? 15;
+    // Default duration: remainder if any, else minTimeMinutes, else 15 min.
+    const remaining = this.remainingMinutes(task);
+    const minutes = remaining > 0 ? remaining : (task.minTimeMinutes ?? 15);
     const total = hour * 60 + minutes;
     const eh = Math.min(23, Math.floor(total / 60));
     const em = total % 60;
     const end = `${eh.toString().padStart(2, '0')}:${em.toString().padStart(2, '0')}`;
 
-    this.plannedTasks.update(task.id, { startTime: start, endTime: end, needsTimeSlot: true })
-      .subscribe(() => {
-        // Check if dropped date is covered by the cadence
-        const droppedDate = new Date(dateStr + 'T00:00:00');
-        const droppedWeekday = JS_DAY_TO_WEEKDAY[droppedDate.getDay()];
-        const existingWeekdays = task.weekdays ?? [];
-        const isCovered = task.cadence !== 'WEEKLY' || existingWeekdays.includes(droppedWeekday);
+    const droppedDate = new Date(dateStr + 'T00:00:00');
+    const droppedWeekday = JS_DAY_TO_WEEKDAY[droppedDate.getDay()];
+    const existingWeekdays = task.weekdays ?? [];
+    const isCovered = task.cadence !== 'WEEKLY' || existingWeekdays.includes(droppedWeekday);
 
-        if (!isCovered && task.cadence === 'WEEKLY') {
-          this.plannedTasks.addException(task.id, dateStr, 'ADD').subscribe(() => {
-            this.reload();
-            this.openPopup(
-              `Add ${droppedWeekday} to every week's ${task.title}?`,
-              'Yes, every week',
-              'No, just this date',
-              () => {
-                this.plannedTasks.applyPermanently(task.id, dateStr, {
-                  weekdays: [...existingWeekdays, droppedWeekday],
-                }).subscribe(() => this.reload());
-              },
-              () => this.reload(),
-            );
-          });
-        } else {
+    const finishCoverage = () => {
+      if (!isCovered && task.cadence === 'WEEKLY') {
+        this.plannedTasks.addException(task.id, dateStr, 'ADD').subscribe(() => {
           this.reload();
-        }
+          this.openPopup(
+            `Add ${droppedWeekday} to every week's ${task.title}?`,
+            'Yes, every week',
+            'No, just this date',
+            () => {
+              this.plannedTasks.applyPermanently(task.id, dateStr, {
+                weekdays: [...existingWeekdays, droppedWeekday],
+              }).subscribe(() => this.reload());
+            },
+            () => this.reload(),
+          );
+        });
+      } else {
+        this.reload();
+      }
+    };
+
+    const segs = task.segmentsForDate ?? [];
+    if (segs.length === 0 && task.startTime && task.endTime) {
+      // Lift template times into a segment so adding a new chunk doesn't replace the existing render.
+      this.plannedTasks.createSegment(task.id, dateStr, task.startTime, task.endTime).subscribe({
+        next: () => this.plannedTasks.createSegment(task.id, dateStr, start, end).subscribe(() => finishCoverage()),
+        error: () => this.plannedTasks.createSegment(task.id, dateStr, start, end).subscribe(() => finishCoverage()),
       });
+    } else if (segs.length === 0 && !task.startTime) {
+      // First time scheduling — set template times.
+      this.plannedTasks.update(task.id, { startTime: start, endTime: end, needsTimeSlot: true })
+        .subscribe(() => finishCoverage());
+    } else {
+      this.plannedTasks.createSegment(task.id, dateStr, start, end)
+        .subscribe(() => finishCoverage());
+    }
   }
 
-  // ── Pointer interaction: select → edit/move ─────────────────────────
+  // ── Pointer interaction: tap → edit, hold-and-drag → move ──────────
   onEventDown(event: MouseEvent | TouchEvent, evt: PlannedTask): void {
-    if ((event.target as HTMLElement).closest('[data-resize-handle]')) return;
+    const target = event.target as HTMLElement;
+    if (target.closest('[data-resize-handle]')) return;
     if (this.moveDrag) this.cancelMoveDrag();
 
     event.stopPropagation();
     if ('touches' in event) event.preventDefault();
-
-    // First tap on an unselected event just selects it. Drag/edit needs a 2nd interaction.
-    if (this.selectedEventId() !== evt.id) {
-      this.zone.run(() => this.selectedEventId.set(evt.id));
-      return;
-    }
+    this.zone.run(() => this.selectedEventId.set(evt.id));
 
     // Determine which column (date) this event is displayed in
     const el = event.target as HTMLElement;
@@ -859,6 +1079,12 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
       const el = this.doc.elementFromPoint(x, y);
       this.moveDrag.ghost.style.visibility = 'visible';
 
+      const overBin = !!el?.closest('[data-bin]');
+      if (overBin !== this.moveOverBin) {
+        this.moveOverBin = overBin;
+        this.zone.run(() => this.binArmed.set(overBin));
+      }
+
       const cell = el?.closest('[data-hour][data-date]');
       const hour = cell ? parseInt(cell.getAttribute('data-hour')!, 10) : null;
       const date = cell ? cell.getAttribute('data-date') : null;
@@ -873,7 +1099,7 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
     }
   }
 
-  private onMoveEnd(_event: MouseEvent | TouchEvent): void {
+  private onMoveEnd(event: MouseEvent | TouchEvent): void {
     if (!this.moveDrag) return;
     const drag = this.moveDrag;
 
@@ -891,8 +1117,13 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
       drag.ghost = null;
     }
 
+    const droppedOnBin = drag.isDragging && this.pointerOverBin(event);
+    this.moveOverBin = false;
+
     this.zone.run(() => {
-      if (drag.isDragging) {
+      if (droppedOnBin) {
+        this.deleteBar(drag.evt as WeekBar, drag.fromDate);
+      } else if (drag.isDragging) {
         if (drag.hoverHour !== null && drag.hoverDate && drag.evt.startTime && drag.evt.endTime) {
           const duration = this.diffMinutes(drag.evt.startTime, drag.evt.endTime);
           const newStart = `${drag.hoverHour.toString().padStart(2, '0')}:00`;
@@ -901,38 +1132,25 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
           const toDate = drag.hoverDate;
 
           if (fromDate && toDate && fromDate !== toDate) {
-            // Cross-day move: use exception flow
-            const task = drag.evt;
-            const fromDateObj = new Date(fromDate + 'T00:00:00');
-            const toDateObj = new Date(toDate + 'T00:00:00');
-            const fromWeekday = JS_DAY_TO_WEEKDAY[fromDateObj.getDay()];
-            const toWeekday = JS_DAY_TO_WEEKDAY[toDateObj.getDay()];
-
-            this.plannedTasks.addException(task.id, fromDate, 'SKIP').subscribe(() => {
-              this.plannedTasks.addException(task.id, toDate, 'ADD').subscribe(() => {
-                this.reload();
-                this.openPopup(
-                  `Move ${task.title} from ${fromWeekday} to ${toWeekday} every week?`,
-                  'Yes, every week',
-                  'No, just this date',
-                  () => {
-                    const existingWeekdays = task.weekdays ?? [];
-                    const newWeekdays = existingWeekdays
-                      .filter(d => d !== fromWeekday)
-                      .concat(toWeekday);
-                    this.plannedTasks.removeException(task.id, toDate).subscribe(() => {
-                      this.plannedTasks.applyPermanently(task.id, fromDate, { weekdays: newWeekdays })
-                        .subscribe(() => this.reload());
-                    });
-                  },
-                  () => this.reload(),
-                );
-              });
-            });
+            const bar = drag.evt as WeekBar;
+            if (bar._segmentId) {
+              // Segment cross-day move: rebuild on toDate
+              this.moveSegmentToDate(bar, fromDate, toDate, newStart, newEnd);
+            } else {
+              this.moveTemplateBarToDate(bar, fromDate, toDate);
+            }
           } else {
-            // Same-day move: simple update
-            this.plannedTasks.update(drag.evt.id, { startTime: newStart, endTime: newEnd })
-              .subscribe(() => this.reload());
+            // Same-day move: segment-aware branching
+            const bar = drag.evt as WeekBar;
+            if (bar._segmentId) {
+              this.plannedTasks.updateSegment(bar.id, bar._segmentId, { startTime: newStart, endTime: newEnd })
+                .subscribe(() => this.reload());
+            } else if (bar.cadence === 'ONCE') {
+              this.plannedTasks.update(bar.id, { startTime: newStart, endTime: newEnd })
+                .subscribe(() => this.reload());
+            } else {
+              this.askTimePopupFor(bar, drag.fromDate, newStart, newEnd);
+            }
           }
         }
       } else {
@@ -941,9 +1159,281 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
       this.movingEventId.set(null);
       this.dragOverHour.set(null);
       this.dragOverDate.set(null);
+      this.binArmed.set(false);
     });
 
     this.moveDrag = null;
+  }
+
+  defaultPopupDate(): string {
+    return this.isoOf(this.weekStart);
+  }
+
+  openSlotPopup(): void {
+    this.slotPopupError.set(null);
+    this.slotPopupBusy.set(false);
+    this.plannedTasks.loadAll().subscribe(list => {
+      this.allTasks.set(list);
+      this.slotPopupOpen.set(true);
+    });
+  }
+
+  closeSlotPopup(): void {
+    this.slotPopupOpen.set(false);
+    this.slotPopupError.set(null);
+    this.slotPopupBusy.set(false);
+  }
+
+  goToNewTask(): void {
+    this.closeSlotPopup();
+    this.router.navigateByUrl('/new-task');
+  }
+
+  onSlotConfirm(e: SlotPopupConfirm): void {
+    if (this.slotPopupBusy()) return;
+    this.slotPopupError.set(null);
+    this.slotPopupBusy.set(true);
+
+    const task = this.allTasks().find(t => t.id === e.taskId);
+    if (!task) {
+      this.slotPopupBusy.set(false);
+      this.slotPopupError.set('Task not found. Refresh and try again.');
+      return;
+    }
+
+    const onError = (err: any, fallback: string) => {
+      this.slotPopupBusy.set(false);
+      this.slotPopupError.set(this.errorMessageFor(err, fallback));
+    };
+
+    const create = () => {
+      this.plannedTasks.createSegment(e.taskId, e.date, e.startTime, e.endTime)
+        .subscribe({
+          next: () => {
+            this.slotPopupBusy.set(false);
+            this.closeSlotPopup();
+            this.reload();
+          },
+          error: (err) => onError(err, 'Could not create the slot.'),
+        });
+    };
+
+    this.prepareDateForSegment(task, e.date).subscribe({
+      next: create,
+      error: (err) => onError(err, 'Could not schedule on this date.'),
+    });
+  }
+
+  private prepareDateForSegment(task: PlannedTask, date: string): Observable<unknown> {
+    const ex = task.exceptions?.find(x => x.date === date);
+    const covered = this.isApplicable({ ...task, exceptions: [] } as PlannedTask, date);
+
+    if (covered) {
+      if (ex?.type === 'SKIP') {
+        return this.plannedTasks.removeException(task.id, date);
+      }
+      return of(null);
+    }
+    if (ex?.type === 'ADD') {
+      return of(null);
+    }
+    if (ex?.type === 'SKIP') {
+      return this.plannedTasks.removeException(task.id, date).pipe(
+        switchMap(() => this.plannedTasks.addException(task.id, date, 'ADD')),
+      );
+    }
+    return this.plannedTasks.addException(task.id, date, 'ADD');
+  }
+
+  private errorMessageFor(err: any, fallback: string): string {
+    const code = err?.error?.code;
+    if (code === 'SEGMENT_OVERLAP') return 'That time overlaps with another slot for this task.';
+    if (code === 'EXCEPTION_ALREADY_EXISTS') return 'An exception already exists on that date.';
+    return err?.error?.message || fallback;
+  }
+
+  private isExceptionConflict(err: any): boolean {
+    return err?.status === 409 || err?.error?.code === 'EXCEPTION_ALREADY_EXISTS';
+  }
+
+  private isApplicable(task: PlannedTask, dateStr: string): boolean {
+    if (task.cadence === 'DAILY') return true;
+    if (task.cadence === 'ONCE') return dateStr === task.scheduledDate;
+    const d = new Date(dateStr + 'T00:00:00');
+    if (task.cadence === 'WEEKLY') {
+      const names: Weekday[] = [
+        'SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY',
+      ];
+      return task.weekdays?.includes(names[d.getDay()]) ?? false;
+    }
+    if (task.cadence === 'MONTHLY') {
+      return task.monthDays?.includes(d.getDate()) ?? false;
+    }
+    return false;
+  }
+
+  private moveSegmentToDate(bar: WeekBar, fromDate: string, toDate: string, newStart: string, newEnd: string): void {
+    const taskId = bar.id;
+    const segmentId = bar._segmentId!;
+    const ops: (() => Observable<unknown>)[] = [];
+
+    ops.push(() => this.plannedTasks.deleteSegment(taskId, segmentId));
+
+    const fromEx = bar.exceptions?.find(e => e.date === fromDate);
+    const fromOtherSegs = (bar.segmentsForDate ?? []).filter(s => s.id !== segmentId);
+    if (fromEx?.type === 'ADD' && fromOtherSegs.length === 0) {
+      ops.push(() => this.plannedTasks.removeException(taskId, fromDate));
+    }
+
+    const toCovered = this.isApplicable({ ...bar, exceptions: [] } as PlannedTask, toDate);
+    const toEx = bar.exceptions?.find(e => e.date === toDate);
+    if (!toCovered) {
+      if (toEx?.type === 'SKIP') {
+        ops.push(() => this.plannedTasks.removeException(taskId, toDate));
+        ops.push(() => this.plannedTasks.addException(taskId, toDate, 'ADD'));
+      } else if (!toEx) {
+        ops.push(() => this.plannedTasks.addException(taskId, toDate, 'ADD'));
+      }
+    } else if (toEx?.type === 'SKIP') {
+      ops.push(() => this.plannedTasks.removeException(taskId, toDate));
+    }
+
+    ops.push(() => this.plannedTasks.createSegment(taskId, toDate, newStart, newEnd));
+
+    this.chainOps(ops, () => this.reload());
+  }
+
+  private moveTemplateBarToDate(bar: WeekBar, fromDate: string, toDate: string): void {
+    const taskId = bar.id;
+    const task = bar;
+    const fromCovered = this.isApplicable({ ...bar, exceptions: [] } as PlannedTask, fromDate);
+    const toCovered = this.isApplicable({ ...bar, exceptions: [] } as PlannedTask, toDate);
+    const fromEx = bar.exceptions?.find(e => e.date === fromDate);
+    const toEx = bar.exceptions?.find(e => e.date === toDate);
+    const fromDateObj = new Date(fromDate + 'T00:00:00');
+    const toDateObj = new Date(toDate + 'T00:00:00');
+    const fromWeekday = JS_DAY_TO_WEEKDAY[fromDateObj.getDay()];
+    const toWeekday = JS_DAY_TO_WEEKDAY[toDateObj.getDay()];
+
+    const ops: (() => Observable<unknown>)[] = [];
+
+    if (fromCovered && !fromEx) {
+      ops.push(() => this.plannedTasks.addException(taskId, fromDate, 'SKIP'));
+    } else if (!fromCovered && fromEx?.type === 'ADD') {
+      ops.push(() => this.plannedTasks.removeException(taskId, fromDate));
+    }
+
+    if (toCovered && toEx?.type === 'SKIP') {
+      ops.push(() => this.plannedTasks.removeException(taskId, toDate));
+    } else if (!toCovered && !toEx) {
+      ops.push(() => this.plannedTasks.addException(taskId, toDate, 'ADD'));
+    } else if (!toCovered && toEx?.type === 'SKIP') {
+      ops.push(() => this.plannedTasks.removeException(taskId, toDate));
+      ops.push(() => this.plannedTasks.addException(taskId, toDate, 'ADD'));
+    }
+
+    const askPermanent =
+      task.cadence === 'WEEKLY' &&
+      fromCovered &&
+      (task.weekdays?.includes(fromWeekday) ?? false);
+
+    this.chainOps(ops, () => {
+      this.reload();
+      if (askPermanent) {
+        this.openPopup(
+          `Move ${task.title} from ${fromWeekday} to ${toWeekday} every week?`,
+          'Yes, every week',
+          'No, just this date',
+          () => {
+            const existingWeekdays = task.weekdays ?? [];
+            const newWeekdays = existingWeekdays
+              .filter(d => d !== fromWeekday)
+              .concat(toWeekday);
+            this.plannedTasks.removeException(taskId, toDate).subscribe({
+              next: () => this.plannedTasks.applyPermanently(taskId, fromDate, { weekdays: newWeekdays })
+                .subscribe(() => this.reload()),
+              error: () => this.reload(),
+            });
+          },
+          () => {},
+        );
+      }
+    });
+  }
+
+  private chainOps(ops: (() => Observable<unknown>)[], done: () => void): void {
+    if (ops.length === 0) { done(); return; }
+    const head = ops.shift()!;
+    head().subscribe({
+      next: () => this.chainOps(ops, done),
+      error: () => this.chainOps(ops, done),
+    });
+  }
+
+  private deleteBar(bar: WeekBar, date: string): void {
+    if (bar.cadence === 'ONCE') {
+      this.plannedTasks.remove(bar.id).subscribe(() => this.reload());
+      return;
+    }
+    this.removeOccurrenceForDate(bar, date);
+  }
+
+  private removeOccurrenceForDate(bar: WeekBar, date: string): void {
+    const after = () => this.reload();
+    const ex = bar.exceptions?.find(e => e.date === date);
+
+    if (bar._segmentId) {
+      const otherSegs = (bar.segmentsForDate ?? []).filter(s => s.id !== bar._segmentId);
+      this.plannedTasks.deleteSegment(bar.id, bar._segmentId).subscribe({
+        next: () => {
+          if (otherSegs.length === 0 && ex?.type === 'ADD') {
+            this.plannedTasks.removeException(bar.id, date)
+              .subscribe({ next: after, error: after });
+          } else {
+            after();
+          }
+        },
+        error: after,
+      });
+      return;
+    }
+
+    const covered = this.isApplicable({ ...bar, exceptions: [] } as PlannedTask, date);
+    if (ex?.type === 'ADD') {
+      this.plannedTasks.removeException(bar.id, date)
+        .subscribe({ next: after, error: after });
+    } else if (covered && !ex) {
+      this.plannedTasks.addException(bar.id, date, 'SKIP')
+        .subscribe({ next: after, error: after });
+    } else {
+      after();
+    }
+  }
+
+  private askTimePopupFor(task: PlannedTask, date: string, start: string, newEnd: string): void {
+    const unit = this.cadenceUnitLabel(task, date);
+    this.openPopup(
+      `Apply this time to every ${unit}?`,
+      `Yes, every ${unit}`,
+      'No, just this date',
+      () => this.plannedTasks.update(task.id, { startTime: start, endTime: newEnd })
+        .subscribe(() => this.reload()),
+      () => this.plannedTasks.createSegment(task.id, date, start, newEnd)
+        .subscribe(() => this.reload()),
+    );
+  }
+
+  private cadenceUnitLabel(task: PlannedTask, dateIso: string): string {
+    if (task.cadence === 'DAILY') return 'day';
+    if (task.cadence === 'WEEKLY') {
+      const wd = new Date(dateIso + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long' });
+      return wd;
+    }
+    if (task.cadence === 'MONTHLY') {
+      const day = new Date(dateIso + 'T00:00:00').getDate();
+      return `day ${day} of the month`;
+    }
+    return 'occurrence';
   }
 
   // ── Selection: tap empty cell to deselect ───────────────────────────
@@ -978,6 +1468,10 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
       this.autoPanRaf = null;
       return;
     }
+    if (this.moveOverBin) {
+      this.autoPanRaf = null;
+      return;
+    }
     const el = this.gridScrollEl;
     const rect = el.getBoundingClientRect();
     const EDGE = 60;
@@ -985,17 +1479,17 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
     const { x, y } = this.currentDragXY;
 
     let dx = 0, dy = 0;
-    if (x < rect.left + EDGE) {
+    if (x >= rect.left && x < rect.left + EDGE) {
       const t = Math.min(1, (rect.left + EDGE - x) / EDGE);
       dx = -Math.round(MAX_SPEED * t);
-    } else if (x > rect.right - EDGE) {
+    } else if (x <= rect.right && x > rect.right - EDGE) {
       const t = Math.min(1, (x - (rect.right - EDGE)) / EDGE);
       dx = Math.round(MAX_SPEED * t);
     }
-    if (y < rect.top + EDGE) {
+    if (y >= rect.top && y < rect.top + EDGE) {
       const t = Math.min(1, (rect.top + EDGE - y) / EDGE);
       dy = -Math.round(MAX_SPEED * t);
-    } else if (y > rect.bottom - EDGE) {
+    } else if (y <= rect.bottom && y > rect.bottom - EDGE) {
       const t = Math.min(1, (y - (rect.bottom - EDGE)) / EDGE);
       dy = Math.round(MAX_SPEED * t);
     }
@@ -1047,7 +1541,29 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
     this.movingEventId.set(null);
     this.dragOverHour.set(null);
     this.dragOverDate.set(null);
+    this.binArmed.set(false);
+    this.moveOverBin = false;
     this.moveDrag = null;
+  }
+
+  private pointerOverBin(event: MouseEvent | TouchEvent): boolean {
+    let x: number, y: number;
+    if ('changedTouches' in event && event.changedTouches.length > 0) {
+      x = event.changedTouches[0].clientX;
+      y = event.changedTouches[0].clientY;
+    } else if ('touches' in event && event.touches.length > 0) {
+      x = event.touches[0].clientX;
+      y = event.touches[0].clientY;
+    } else {
+      x = (event as MouseEvent).clientX;
+      y = (event as MouseEvent).clientY;
+    }
+    if (this.currentDragXY && (x === 0 && y === 0)) {
+      x = this.currentDragXY.x;
+      y = this.currentDragXY.y;
+    }
+    const el = this.doc.elementFromPoint(x, y);
+    return !!el?.closest('[data-bin]');
   }
 
   private createMoveGhost(evt: PlannedTask): void {
@@ -1123,8 +1639,17 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
         const minutes = this.pixelsToMinutes(this.resizingHeight());
         if (minutes > 0) {
           const newEnd = this.addMinutesToTime(this.resizeEvent.startTime, minutes);
-          this.plannedTasks.update(this.resizeEvent.id, { endTime: newEnd })
-            .subscribe(() => this.reload());
+          const bar = this.resizeEvent as WeekBar;
+          if (bar._segmentId) {
+            this.plannedTasks.updateSegment(bar.id, bar._segmentId, { endTime: newEnd })
+              .subscribe(() => this.reload());
+          } else if (bar.cadence === 'ONCE') {
+            this.plannedTasks.update(bar.id, { endTime: newEnd })
+              .subscribe(() => this.reload());
+          } else {
+            const date = bar._dateStr ?? '';
+            this.askTimePopupFor(bar, date, bar.startTime!, newEnd);
+          }
         }
       }
       this.resizingEventId.set(null);
@@ -1170,11 +1695,24 @@ export class ScheduleWeekComponent implements OnInit, OnDestroy {
     const [sh, sm] = this.editStart.split(':').map(Number);
     const [eh, em] = this.editEnd.split(':').map(Number);
     if ((eh * 60 + em) - (sh * 60 + sm) <= 0) return;
-    this.plannedTasks.update(evt.id, {
-      startTime: this.editStart,
-      endTime: this.editEnd,
-    }).subscribe(() => this.reload());
+    const bar = evt as WeekBar;
+    const date = bar._dateStr || this.editDate;
     this.editingEvent.set(null);
+
+    if (bar._segmentId) {
+      // Segment bars override template times — edit the segment itself.
+      this.plannedTasks.updateSegment(bar.id, bar._segmentId, {
+        startTime: this.editStart,
+        endTime: this.editEnd,
+      }).subscribe(() => this.reload());
+    } else if (bar.cadence === 'ONCE') {
+      this.plannedTasks.update(bar.id, {
+        startTime: this.editStart,
+        endTime: this.editEnd,
+      }).subscribe(() => this.reload());
+    } else {
+      this.askTimePopupFor(bar, date, this.editStart, this.editEnd);
+    }
   }
 
   // ── Exception popup handlers ─────────────────────────────────────────

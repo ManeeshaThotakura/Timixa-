@@ -19,6 +19,14 @@ public interface PlannedTaskCompletionRepository
     List<UUID> findCompletedTaskIds(@Param("taskIds") Collection<UUID> taskIds,
                                     @Param("date") LocalDate date);
 
+    List<PlannedTaskCompletion> findByTaskIdInAndCompletedDate(Collection<UUID> taskIds,
+                                                                LocalDate date);
+
+    java.util.Optional<PlannedTaskCompletion> findByTaskIdAndCompletedDate(UUID taskId,
+                                                                           LocalDate date);
+
+    List<PlannedTaskCompletion> findByTaskIdIn(Collection<UUID> taskIds);
+
     @Modifying
     @Transactional
     void deleteByTaskIdAndCompletedDate(UUID taskId, LocalDate completedDate);

@@ -7,6 +7,7 @@ import { ProjectService } from '../../../core/services/project.service';
 import { ScheduleService } from '../../../core/services/schedule.service';
 import { InsightService } from '../../../core/services/insight.service';
 import { ReminderService } from '../../../core/services/reminder.service';
+import { NotificationSchedulerService } from '../../../core/services/notification-scheduler.service';
 import { routeAnimations } from '../../animations/route.animations';
 
 @Component({
@@ -30,6 +31,7 @@ export class AppShellComponent implements OnInit {
   private schedule = inject(ScheduleService);
   private insights = inject(InsightService);
   private reminders = inject(ReminderService);
+  private notifications = inject(NotificationSchedulerService);
 
   ngOnInit(): void {
     this.habits.load();
@@ -37,5 +39,6 @@ export class AppShellComponent implements OnInit {
     this.schedule.load();
     this.insights.load();
     this.reminders.load();
+    this.notifications.start();
   }
 }

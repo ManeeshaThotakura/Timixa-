@@ -66,6 +66,12 @@ public class PlannedTask {
     @Column(name = "max_count")
     private Integer maxCount;
 
+    @Column(name = "notify_at_start", nullable = false)
+    private boolean notifyAtStart = false;
+
+    @Column(name = "notify_at_end", nullable = false)
+    private boolean notifyAtEnd = false;
+
     @CreatedDate
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -139,6 +145,10 @@ public class PlannedTask {
     public void setMinCount(Integer v) { this.minCount = v; }
     public Integer getMaxCount() { return maxCount; }
     public void setMaxCount(Integer v) { this.maxCount = v; }
+    public boolean isNotifyAtStart() { return notifyAtStart; }
+    public void setNotifyAtStart(boolean v) { this.notifyAtStart = v; }
+    public boolean isNotifyAtEnd() { return notifyAtEnd; }
+    public void setNotifyAtEnd(boolean v) { this.notifyAtEnd = v; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
 }
