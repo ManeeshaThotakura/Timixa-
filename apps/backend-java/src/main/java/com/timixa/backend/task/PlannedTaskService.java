@@ -5,6 +5,7 @@ import com.timixa.backend.common.TaskNotFoundException;
 import com.timixa.backend.task.dto.PlannedTaskExceptionResponse;
 import com.timixa.backend.task.dto.PlannedTaskRequest;
 import com.timixa.backend.task.dto.PlannedTaskResponse;
+import com.timixa.backend.task.dto.PlannedTaskSegmentResponse;
 import com.timixa.backend.task.dto.PlannedTaskUpdateRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,13 +20,16 @@ public class PlannedTaskService {
     private final PlannedTaskRepository tasks;
     private final PlannedTaskCompletionRepository completions;
     private final PlannedTaskExceptionRepository exceptions;
+    private final PlannedTaskSegmentRepository segments;
 
     public PlannedTaskService(PlannedTaskRepository tasks,
                               PlannedTaskCompletionRepository completions,
-                              PlannedTaskExceptionRepository exceptions) {
+                              PlannedTaskExceptionRepository exceptions,
+                              PlannedTaskSegmentRepository segments) {
         this.tasks = tasks;
         this.completions = completions;
         this.exceptions = exceptions;
+        this.segments = segments;
     }
 
     @Transactional
@@ -46,6 +50,8 @@ public class PlannedTaskService {
         t.setMaxTimeMinutes(req.maxTimeMinutes());
         t.setMinCount(req.minCount());
         t.setMaxCount(req.maxCount());
+        if (req.notifyAtStart() != null) t.setNotifyAtStart(req.notifyAtStart());
+        if (req.notifyAtEnd() != null) t.setNotifyAtEnd(req.notifyAtEnd());
         validate(t);
         PlannedTask saved = tasks.save(t);
         return PlannedTaskResponse.from(saved, List.of(), false);
@@ -55,12 +61,18 @@ public class PlannedTaskService {
     public List<PlannedTaskResponse> findAll(UUID userId) {
         List<PlannedTask> all = tasks.findByUserIdOrderByCreatedAtDesc(userId);
         Map<UUID, List<PlannedTaskExceptionResponse>> exMap = exceptionsByTask(all);
-        Set<UUID> completedToday = completedIdsForToday(all);
+        Map<UUID, Integer> countToday = countsForDate(all, LocalDate.now());
         return all.stream()
-            .map(t -> PlannedTaskResponse.from(
-                t,
-                exMap.getOrDefault(t.getId(), List.of()),
-                completedToday.contains(t.getId())))
+            .map(t -> {
+                int currentCount = countToday.getOrDefault(t.getId(), 0);
+                boolean completed = currentCount >= targetFor(t);
+                return PlannedTaskResponse.from(
+                    t,
+                    exMap.getOrDefault(t.getId(), List.of()),
+                    List.of(),
+                    completed,
+                    currentCount);
+            })
             .toList();
     }
 
@@ -72,23 +84,61 @@ public class PlannedTaskService {
             .filter(t -> appliesOn(t, date, exByTaskAndDate.getOrDefault(t.getId(), Map.of())))
             .toList();
         Map<UUID, List<PlannedTaskExceptionResponse>> exMap = exceptionsByTask(filtered);
-        Set<UUID> completedToday = completedIdsForToday(filtered);
+        Map<UUID, List<PlannedTaskSegmentResponse>> segMap = segmentsForDate(filtered, date);
+        Map<UUID, Integer> countByTask = countsForDate(filtered, date);
         return filtered.stream()
-            .map(t -> PlannedTaskResponse.from(
-                t,
-                exMap.getOrDefault(t.getId(), List.of()),
-                completedToday.contains(t.getId())))
+            .map(t -> {
+                int currentCount = countByTask.getOrDefault(t.getId(), 0);
+                boolean completed = currentCount >= targetFor(t);
+                return PlannedTaskResponse.from(
+                    t,
+                    exMap.getOrDefault(t.getId(), List.of()),
+                    segMap.getOrDefault(t.getId(), List.of()),
+                    completed,
+                    currentCount);
+            })
             .toList();
+    }
+
+    public static int targetFor(PlannedTask t) {
+        if (t.getMinTimeMinutes() != null && t.getMinTimeMinutes() > 0) {
+            return t.getMinTimeMinutes();
+        }
+        Integer slotMinutes = slotDurationMinutes(t);
+        if (slotMinutes != null && slotMinutes > 0) return slotMinutes;
+        return Math.max(1, t.getMinCount() == null ? 1 : t.getMinCount());
+    }
+
+    private static Integer slotDurationMinutes(PlannedTask t) {
+        if (t.getStartTime() == null || t.getEndTime() == null) return null;
+        try {
+            String[] s = t.getStartTime().split(":");
+            String[] e = t.getEndTime().split(":");
+            int start = Integer.parseInt(s[0]) * 60 + Integer.parseInt(s[1]);
+            int end   = Integer.parseInt(e[0]) * 60 + Integer.parseInt(e[1]);
+            int diff = end - start;
+            return diff > 0 ? diff : null;
+        } catch (Exception ex) {
+            return null;
+        }
     }
 
     @Transactional(readOnly = true)
     public PlannedTaskResponse findOne(UUID userId, UUID taskId) {
+        return findOneForDate(userId, taskId, LocalDate.now());
+    }
+
+    @Transactional(readOnly = true)
+    public PlannedTaskResponse findOneForDate(UUID userId, UUID taskId, LocalDate date) {
         PlannedTask t = requireOwnedTask(userId, taskId);
         List<PlannedTaskExceptionResponse> ex = exceptions.findByTaskIdIn(List.of(t.getId())).stream()
             .map(PlannedTaskExceptionResponse::from).toList();
-        boolean completed = !completions
-            .findCompletedTaskIds(List.of(t.getId()), LocalDate.now()).isEmpty();
-        return PlannedTaskResponse.from(t, ex, completed);
+        List<PlannedTaskSegmentResponse> seg = segments.findByTaskIdAndSegmentDate(t.getId(), date).stream()
+            .map(PlannedTaskSegmentResponse::from).toList();
+        int currentCount = completions.findByTaskIdAndCompletedDate(t.getId(), date)
+            .map(PlannedTaskCompletion::getCount).orElse(0);
+        boolean completed = currentCount >= targetFor(t);
+        return PlannedTaskResponse.from(t, ex, seg, completed, currentCount);
     }
 
     @Transactional
@@ -108,6 +158,8 @@ public class PlannedTaskService {
         if (req.maxTimeMinutes() != null) t.setMaxTimeMinutes(req.maxTimeMinutes());
         if (req.minCount() != null) t.setMinCount(req.minCount());
         if (req.maxCount() != null) t.setMaxCount(req.maxCount());
+        if (req.notifyAtStart() != null) t.setNotifyAtStart(req.notifyAtStart());
+        if (req.notifyAtEnd() != null) t.setNotifyAtEnd(req.notifyAtEnd());
         validate(t);
         PlannedTask saved = tasks.save(t);
         return findOne(userId, saved.getId());
@@ -116,10 +168,30 @@ public class PlannedTaskService {
     @Transactional
     public PlannedTaskResponse complete(UUID userId, UUID taskId, LocalDate date) {
         PlannedTask t = requireOwnedTask(userId, taskId);
-        PlannedTaskCompletionId pk = new PlannedTaskCompletionId(t.getId(), date);
-        if (completions.existsById(pk)) throw new TaskAlreadyCompleteException();
-        completions.save(new PlannedTaskCompletion(t.getId(), date, Instant.now()));
-        return findOne(userId, t.getId());
+        int target = targetFor(t);
+        PlannedTaskCompletion c = completions.findByTaskIdAndCompletedDate(t.getId(), date)
+            .orElse(null);
+        if (c != null && c.getCount() >= target) throw new TaskAlreadyCompleteException();
+        if (c == null) {
+            c = new PlannedTaskCompletion(t.getId(), date, target, Instant.now());
+        } else {
+            c.setCount(target);
+            c.setCompletedAt(Instant.now());
+        }
+        completions.save(c);
+        return findOneForDate(userId, t.getId(), date);
+    }
+
+    @Transactional
+    public PlannedTaskResponse increment(UUID userId, UUID taskId, LocalDate date, int delta) {
+        if (delta < 1) delta = 1;
+        PlannedTask t = requireOwnedTask(userId, taskId);
+        PlannedTaskCompletion c = completions.findByTaskIdAndCompletedDate(t.getId(), date)
+            .orElseGet(() -> new PlannedTaskCompletion(t.getId(), date, 0, Instant.now()));
+        c.setCount(c.getCount() + delta);
+        c.setCompletedAt(Instant.now());
+        completions.save(c);
+        return findOneForDate(userId, t.getId(), date);
     }
 
     @Transactional
@@ -133,6 +205,7 @@ public class PlannedTaskService {
         PlannedTask t = requireOwnedTask(userId, taskId);
         completions.deleteByTaskId(taskId);
         exceptions.deleteByTaskId(taskId);
+        segments.deleteByTaskId(taskId);
         tasks.delete(t);
     }
 
@@ -142,9 +215,9 @@ public class PlannedTaskService {
         return t;
     }
 
-    static boolean appliesOn(PlannedTask t,
-                             LocalDate date,
-                             Map<LocalDate, ExceptionType> exForTask) {
+    public static boolean appliesOn(PlannedTask t,
+                                    LocalDate date,
+                                    Map<LocalDate, ExceptionType> exForTask) {
         ExceptionType ex = exForTask == null ? null : exForTask.get(date);
         return switch (t.getCadence()) {
             case ONCE -> date.equals(t.getScheduledDate());
@@ -160,14 +233,18 @@ public class PlannedTaskService {
         };
     }
 
-    static boolean appliesOn(PlannedTask t, LocalDate date) {
+    public static boolean appliesOn(PlannedTask t, LocalDate date) {
         return appliesOn(t, date, Map.of());
     }
 
-    private Set<UUID> completedIdsForToday(List<PlannedTask> list) {
-        if (list.isEmpty()) return Set.of();
+    private Map<UUID, Integer> countsForDate(List<PlannedTask> list, LocalDate date) {
+        if (list.isEmpty()) return Map.of();
         List<UUID> ids = list.stream().map(PlannedTask::getId).toList();
-        return new HashSet<>(completions.findCompletedTaskIds(ids, LocalDate.now()));
+        Map<UUID, Integer> out = new HashMap<>();
+        for (PlannedTaskCompletion c : completions.findByTaskIdInAndCompletedDate(ids, date)) {
+            out.put(c.getTaskId(), c.getCount());
+        }
+        return out;
     }
 
     private Map<UUID, List<PlannedTaskExceptionResponse>> exceptionsByTask(List<PlannedTask> list) {
@@ -188,6 +265,17 @@ public class PlannedTaskService {
         for (PlannedTaskException e : exceptions.findByTaskIdIn(ids)) {
             out.computeIfAbsent(e.getTaskId(), k -> new HashMap<>())
                .put(e.getExceptionDate(), e.getExceptionType());
+        }
+        return out;
+    }
+
+    private Map<UUID, List<PlannedTaskSegmentResponse>> segmentsForDate(List<PlannedTask> list, LocalDate date) {
+        if (list.isEmpty()) return Map.of();
+        List<UUID> ids = list.stream().map(PlannedTask::getId).toList();
+        Map<UUID, List<PlannedTaskSegmentResponse>> out = new HashMap<>();
+        for (PlannedTaskSegment s : segments.findByTaskIdInAndSegmentDate(ids, date)) {
+            out.computeIfAbsent(s.getTaskId(), k -> new ArrayList<>())
+               .add(PlannedTaskSegmentResponse.from(s));
         }
         return out;
     }

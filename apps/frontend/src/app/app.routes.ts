@@ -42,6 +42,7 @@ export const routes: Routes = [
       { path: 'insights', loadComponent: () => import('./features/insights/insights-dashboard/insights-dashboard.component').then(m => m.InsightsDashboardComponent) },
       { path: 'reminders', loadComponent: () => import('./features/reminders/smart-reminders/smart-reminders.component').then(m => m.SmartRemindersComponent) },
       { path: 'new-task', loadComponent: () => import('./features/new-task/new-task.component').then(m => m.NewTaskComponent) },
+      { path: 'bedtime-summary', loadComponent: () => import('./features/bedtime/bedtime-summary.component').then(m => m.BedtimeSummaryComponent) },
       { path: '', redirectTo: 'dashboard', pathMatch: 'full' },
     ],
   },

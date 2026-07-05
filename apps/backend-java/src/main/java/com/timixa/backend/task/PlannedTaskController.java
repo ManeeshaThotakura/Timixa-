@@ -69,6 +69,22 @@ public class PlannedTaskController {
             .body(service.complete(principal.id(), id, date));
     }
 
+    @PostMapping("/{id}/increment")
+    public PlannedTaskResponse increment(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable UUID id,
+            @RequestBody(required = false) Map<String, Object> body) {
+        LocalDate date = LocalDate.now();
+        int delta = 1;
+        if (body != null) {
+            Object rawDate = body.get("date");
+            if (rawDate != null) date = LocalDate.parse(rawDate.toString());
+            Object rawDelta = body.get("delta");
+            if (rawDelta instanceof Number n) delta = n.intValue();
+        }
+        return service.increment(principal.id(), id, date, delta);
+    }
+
     @DeleteMapping("/{id}/completions/{date}")
     public ResponseEntity<Void> uncomplete(
             @AuthenticationPrincipal UserPrincipal principal,

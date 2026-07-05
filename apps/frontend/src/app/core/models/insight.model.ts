@@ -1,33 +1,41 @@
-export interface GoalPerformance {
+export interface DaySummary {
+  date: string;        // YYYY-MM-DD
+  applicable: number;
+  completed: number;
+  percent: number;
+}
+
+export interface GoalSummary {
   goalName: string;
-  category: string;
   completionRate: number;
   trend: 'up' | 'down' | 'flat';
-  hoursLogged?: number;
-  hoursTarget?: number;
-}
-
-export interface DeepAnalysis {
-  title: string;
-  status: 'verified' | 'warning' | 'info';
-  score?: number;
-  insight?: string;
-}
-
-export interface InsightSummary {
-  overallScore: number;
-  streak: number;
-  focusHours: number;
-  totalHabits: number;
-  goals: GoalPerformance[];
-  deepAnalysis: DeepAnalysis[];
-  timeDistribution: TimeBlock[];
-  individualSync: number;
-  teamSync: number;
 }
 
 export interface TimeBlock {
   label: string;
   hours: number;
   color: string;
+}
+
+export interface StreakInfo {
+  taskId: string;
+  title: string;
+  length: number;
+}
+
+export interface TimeOfDayPerformance {
+  label: string;
+  percent: number;
+}
+
+export interface InsightSummary {
+  windowDays: number;
+  disciplinePercent: number;
+  adherencePercent: number;
+  topStreak?: StreakInfo;
+  days: DaySummary[];
+  goals: GoalSummary[];
+  timeDistribution: TimeBlock[];
+  bestTime?: TimeOfDayPerformance;
+  worstTime?: TimeOfDayPerformance;
 }

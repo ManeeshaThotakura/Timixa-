@@ -204,7 +204,7 @@ class PlannedTaskServiceTest {
 
         PlannedTaskUpdateRequest patch = new PlannedTaskUpdateRequest(
             null, null, null, null, null, "08:00", "09:00", null, null, null,
-            null, null, null, null);
+            null, null, null, null, null, null);
         PlannedTaskResponse r = service.update(userId, id, patch);
         assertThat(r.title()).isEqualTo("Gym");
         assertThat(r.goal()).isEqualTo("Fitness");

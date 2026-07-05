@@ -90,6 +90,24 @@ public class GlobalExceptionHandler {
             .body(ErrorResponse.of("EXCEPTION_ALREADY_EXISTS", e.getMessage()));
     }
 
+    @ExceptionHandler(SegmentOverlapException.class)
+    public ResponseEntity<ErrorResponse> handleSegmentOverlap(SegmentOverlapException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+            .body(ErrorResponse.of("SEGMENT_OVERLAP", e.getMessage()));
+    }
+
+    @ExceptionHandler(SegmentNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleSegmentNotFound(SegmentNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+            .body(ErrorResponse.of("SEGMENT_NOT_FOUND", e.getMessage()));
+    }
+
+    @ExceptionHandler(HabitNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleHabitNotFound(HabitNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+            .body(ErrorResponse.of("HABIT_NOT_FOUND", e.getMessage()));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleAny(Exception e) {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)

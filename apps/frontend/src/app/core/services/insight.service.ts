@@ -1,6 +1,8 @@
 import { Injectable, signal, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
+import { Observable } from 'rxjs';
 import { InsightSummary } from '../models/insight.model';
+import { BedtimeSummary } from '../models/bedtime-summary.model';
 import { environment } from '../../../environments/environment';
 
 @Injectable({ providedIn: 'root' })
@@ -9,30 +11,28 @@ export class InsightService {
   private api = `${environment.apiUrl}/insights`;
 
   private _summary = signal<InsightSummary | null>(null);
-  private _loaded = signal(false);
+  private _loadedDays = signal<number | null>(null);
   readonly summary = this._summary.asReadonly();
 
-  load(): void {
-    if (this._loaded()) return;
-    this._loaded.set(true);
-    this.http.get<InsightSummary>(`${this.api}/summary`).subscribe({
+  load(days = 7): void {
+    if (this._loadedDays() === days && this._summary() !== null) return;
+    this.fetch(days);
+  }
+
+  refresh(days = this._loadedDays() ?? 7): void {
+    this.fetch(days);
+  }
+
+  private fetch(days: number): void {
+    this._loadedDays.set(days);
+    this.http.get<InsightSummary>(`${this.api}/summary?days=${days}`).subscribe({
       next: data => this._summary.set(data),
-      error: () => this._loaded.set(false),
+      error: () => this._loadedDays.set(null),
     });
   }
 
-  refresh(): void {
-    this.http.get<InsightSummary>(`${this.api}/summary`).subscribe(d => this._summary.set(d));
-  }
-
-  getWeeklyStats(): { label: string; value: number }[] {
-    const summary = this._summary();
-    if (!summary || summary.goals.length === 0) return [];
-    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    const avg = summary.goals.reduce((acc, g) => acc + g.completionRate, 0) / summary.goals.length;
-    return days.map((label, i) => ({
-      label,
-      value: Math.round(avg * (0.7 + (i % 3) * 0.15)),
-    }));
+  bedtimeSummary(date?: string): Observable<BedtimeSummary> {
+    const url = date ? `${this.api}/bedtime?date=${date}` : `${this.api}/bedtime`;
+    return this.http.get<BedtimeSummary>(url);
   }
 }
