@@ -1,6 +1,5 @@
 import { Injectable, signal, effect } from '@angular/core';
 import { Activity, ActivityVerb } from '../models/project.model';
-import { environment } from '../../../environments/environment';
 import { MOCK_ACTIVITIES } from '../mocks/projects.mock';
 
 @Injectable({ providedIn: 'root' })
@@ -9,14 +8,14 @@ export class ActivityService {
   private _activities = signal<Activity[]>([]);
   readonly activities = this._activities.asReadonly();
 
+  // Activity feed is a client-side, display-only feature for now (not part of the
+  // Core CockroachDB scope), so it always loads/persists locally regardless of backend.
   constructor() {
-    if (environment.useMock) {
-      this._activities.set(this.read() ?? MOCK_ACTIVITIES);
-      effect(() => {
-        const data = this._activities();
-        try { localStorage.setItem(this.STORAGE_KEY, JSON.stringify(data)); } catch { /* ignore */ }
-      });
-    }
+    this._activities.set(this.read() ?? MOCK_ACTIVITIES);
+    effect(() => {
+      const data = this._activities();
+      try { localStorage.setItem(this.STORAGE_KEY, JSON.stringify(data)); } catch { /* ignore */ }
+    });
   }
 
   byProject(projectId: string): Activity[] {

@@ -1,6 +1,5 @@
 import { Injectable, signal, computed, effect } from '@angular/core';
 import { AppNotification, NotificationType } from '../models/project.model';
-import { environment } from '../../../environments/environment';
 import { MOCK_NOTIFICATIONS } from '../mocks/projects.mock';
 
 @Injectable({ providedIn: 'root' })
@@ -17,14 +16,14 @@ export class NotificationService {
   );
   readonly unreadCount = computed(() => this.notifications().filter(n => !n.read).length);
 
+  // Notifications are a client-side, display-only feature for now (not part of the
+  // Core CockroachDB scope), so they always load/persist locally regardless of backend.
   constructor() {
-    if (environment.useMock) {
-      this._notifications.set(this.read() ?? MOCK_NOTIFICATIONS);
-      effect(() => {
-        const data = this._notifications();
-        try { localStorage.setItem(this.STORAGE_KEY, JSON.stringify(data)); } catch { /* ignore */ }
-      });
-    }
+    this._notifications.set(this.read() ?? MOCK_NOTIFICATIONS);
+    effect(() => {
+      const data = this._notifications();
+      try { localStorage.setItem(this.STORAGE_KEY, JSON.stringify(data)); } catch { /* ignore */ }
+    });
   }
 
   push(entry: { type: NotificationType; text: string; actorName: string; issueId?: string; issueKey?: string; userId?: string }): void {

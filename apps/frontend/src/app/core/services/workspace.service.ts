@@ -1,6 +1,5 @@
 import { Injectable, computed, effect, signal } from '@angular/core';
 import { Workspace } from '../models/project.model';
-import { environment } from '../../../environments/environment';
 import { MOCK_WORKSPACES } from '../mocks/projects.mock';
 
 /**
@@ -23,15 +22,15 @@ export class WorkspaceService {
     this._workspaces().find(w => w.id === this._currentId()) ?? this._workspaces()[0],
   );
 
+  // Workspaces live as a column on projects (no dedicated table in the Core scope),
+  // so the workspace list stays client-side and its selection persists locally.
   constructor() {
-    if (environment.useMock) {
-      effect(() => {
-        if (!this._hydrated()) return;
-        try {
-          localStorage.setItem(this.STORAGE_KEY, JSON.stringify({ workspaces: this._workspaces(), currentId: this._currentId() }));
-        } catch { /* ignore */ }
-      });
-    }
+    effect(() => {
+      if (!this._hydrated()) return;
+      try {
+        localStorage.setItem(this.STORAGE_KEY, JSON.stringify({ workspaces: this._workspaces(), currentId: this._currentId() }));
+      } catch { /* ignore */ }
+    });
   }
 
   load(): void {

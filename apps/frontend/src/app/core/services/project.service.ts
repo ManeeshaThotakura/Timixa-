@@ -1,8 +1,7 @@
-import { Injectable, signal, computed, inject, effect } from '@angular/core';
+import { Injectable, signal, computed, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Project, Issue, IssueType, IssueStatus, Sprint, ProjectStats, TeamMember, Comment } from '../models/project.model';
 import { environment } from '../../../environments/environment';
-import { MOCK_PROJECTS, MOCK_ISSUES, MOCK_SPRINTS, MOCK_STATS, MOCK_TEAM, MOCK_COMMENTS } from '../mocks/projects.mock';
 
 /** Issue types that show as cards on the board (epics group them, subtasks live in stories). */
 const BOARD_TYPES: IssueType[] = ['story', 'task', 'bug'];
@@ -53,6 +52,15 @@ interface BoardColumns {
   done: Issue[];
 }
 
+/**
+ * Backend-first store for the Projects module. Data is loaded from and persisted to
+ * the Spring Boot API (`/api/projects`, `/api/issues`, `/api/sprints`, `/api/comments`,
+ * `/api/team`), which is scoped to the signed-in user and backed by CockroachDB.
+ *
+ * Mutations update the in-memory signals optimistically and reconcile with the server
+ * response. New entities are given a client-generated UUID that is sent to the server,
+ * so their ids stay stable (routing/navigation) without any id-swapping.
+ */
 @Injectable({ providedIn: 'root' })
 export class ProjectService {
   private http = inject(HttpClient);
@@ -69,41 +77,19 @@ export class ProjectService {
   readonly sprints = this._sprints.asReadonly();
   readonly comments = this._comments.asReadonly();
 
-  /** Team members available to assign (mock directory for now). */
-  readonly teamMembers: TeamMember[] = MOCK_TEAM;
+  /**
+   * Assignable members, loaded from `/api/team`. Kept as a stable array reference and
+   * filled in place on load, so components that capture it keep seeing updates.
+   */
+  readonly teamMembers: TeamMember[] = [];
 
-  /** The signed-in member, used as the author for new comments (mock). */
-  readonly currentMember: TeamMember = MOCK_TEAM[0];
-
-  // ── Mock persistence (localStorage) ──────────────────────────────────
-  private readonly STORAGE_KEY = 'timixa_projects_state';
-  /** Bump when the stored shape changes so stale data is discarded. */
-  private readonly STATE_VERSION = 4;
-  private _hydrated = signal(false);
-
-  constructor() {
-    // In mock mode, persist any change so it survives a page refresh.
-    if (environment.useMock) {
-      effect(() => {
-        if (!this._hydrated()) return;
-        const state = {
-          v: this.STATE_VERSION,
-          projects: this._projects(),
-          issues: this._issues(),
-          sprints: this._sprints(),
-          comments: this._comments(),
-        };
-        try {
-          localStorage.setItem(this.STORAGE_KEY, JSON.stringify(state));
-        } catch {
-          /* storage full or unavailable — ignore */
-        }
-      });
-    }
-  }
+  /**
+   * The signed-in member (comment author). Stable object reference; its fields are
+   * filled in place once `/api/team/me` resolves.
+   */
+  readonly currentMember: TeamMember = { id: '', name: 'You', initials: '?', color: '#451de3' };
 
   readonly stats = computed<ProjectStats>(() => {
-    if (environment.useMock) return MOCK_STATS;
     const projects = this._projects();
     const today = new Date();
     const soonMs = 7 * 24 * 60 * 60 * 1000;
@@ -121,29 +107,21 @@ export class ProjectService {
     if (this._loaded()) return;
     this._loaded.set(true);
 
-    if (environment.useMock) {
-      const saved = this.readState();
-      if (saved) {
-        this._projects.set(saved.projects);
-        this._issues.set(saved.issues);
-        this._sprints.set(saved.sprints);
-        this._comments.set(saved.comments);
-      } else {
-        this._projects.set(MOCK_PROJECTS);
-        this._issues.set(MOCK_ISSUES);
-        this._sprints.set(MOCK_SPRINTS);
-        this._comments.set(MOCK_COMMENTS);
-      }
-      this._hydrated.set(true); // enables the persistence effect
-      return;
-    }
-
+    this.http.get<TeamMember[]>(`${this.apiUrl}/team`).subscribe({
+      next: t => this.teamMembers.splice(0, this.teamMembers.length, ...t),
+      error: () => {},
+    });
+    this.http.get<TeamMember>(`${this.apiUrl}/team/me`).subscribe({
+      next: m => Object.assign(this.currentMember, m),
+      error: () => {},
+    });
     this.http.get<Project[]>(`${this.apiUrl}/projects`).subscribe({
       next: p => this._projects.set(p),
       error: () => this._loaded.set(false),
     });
     this.http.get<Issue[]>(`${this.apiUrl}/issues`).subscribe({ next: i => this._issues.set(i), error: () => {} });
     this.http.get<Sprint[]>(`${this.apiUrl}/sprints`).subscribe({ next: s => this._sprints.set(s), error: () => {} });
+    this.http.get<Comment[]>(`${this.apiUrl}/comments`).subscribe({ next: c => this._comments.set(c), error: () => {} });
   }
 
   // ── Projects ─────────────────────────────────────────────────────────
@@ -152,14 +130,16 @@ export class ProjectService {
   }
 
   createProject(input: NewProjectInput): Project {
+    const id = crypto.randomUUID();
     const assignees = this.teamMembers.filter(m => input.assigneeIds.includes(m.id));
     const visible = assignees.slice(0, 3);
+    const keyPrefix = (input.keyPrefix?.trim().toUpperCase() || this.deriveKeyPrefix(input.title)).slice(0, 4);
 
     const project: Project = {
-      id: `p${Date.now()}`,
+      id,
       title: input.title.trim(),
       workspaceId: input.workspaceId,
-      keyPrefix: (input.keyPrefix?.trim().toUpperCase() || this.deriveKeyPrefix(input.title)).slice(0, 4),
+      keyPrefix,
       description: input.description.trim(),
       priority: input.priority,
       status: 'active',
@@ -174,12 +154,23 @@ export class ProjectService {
     };
 
     this._projects.update(ps => [...ps, project]);
-    if (!environment.useMock) {
-      const { id, ...payload } = project;
-      this.http.post<Project>(`${this.apiUrl}/projects`, payload).subscribe(p =>
-        this._projects.update(ps => ps.map(x => (x.id === id ? p : x))),
-      );
-    }
+    this.http.post<Project>(`${this.apiUrl}/projects`, {
+      id,
+      title: project.title,
+      description: project.description,
+      workspaceId: input.workspaceId,
+      keyPrefix,
+      priority: input.priority,
+      startDate: input.startDate,
+      dueDate: input.dueDate,
+      tags: input.tags,
+      color: input.color,
+      icon: input.icon,
+      memberIds: input.assigneeIds,
+    }).subscribe({
+      next: saved => this._projects.update(ps => ps.map(x => (x.id === id ? saved : x))),
+      error: () => this._projects.update(ps => ps.filter(x => x.id !== id)),
+    });
     return project;
   }
 
@@ -231,9 +222,10 @@ export class ProjectService {
   }
 
   createIssue(input: NewIssueInput): Issue {
+    const id = crypto.randomUUID();
     const project = this.getProjectById(input.projectId);
     const issue: Issue = {
-      id: `${input.projectId}-i${Date.now()}`,
+      id,
       projectId: input.projectId,
       key: this.nextKey(input.projectId),
       type: input.type,
@@ -255,19 +247,35 @@ export class ProjectService {
       color: input.color,
     };
 
-    if (environment.useMock) {
-      this._issues.update(is => [...is, issue]);
-    } else {
-      const { id, ...payload } = issue;
-      this.http.post<Issue>(`${this.apiUrl}/issues`, payload).subscribe(i => this._issues.update(is => [...is, i]));
-    }
+    this._issues.update(is => [...is, issue]);
+    this.http.post<Issue>(`${this.apiUrl}/issues`, {
+      id,
+      projectId: input.projectId,
+      type: input.type,
+      parentId: input.parentId,
+      title: issue.title,
+      description: issue.description,
+      acceptanceCriteria: input.acceptanceCriteria,
+      status: issue.status,
+      priority: issue.priority,
+      assigneeId: input.assigneeId || undefined,
+      reporterId: issue.reporterId,
+      storyPoints: input.storyPoints,
+      estimateHours: input.estimateHours,
+      sprintId: input.sprintId,
+      startDate: issue.startDate,
+      dueDate: issue.dueDate,
+      color: input.color,
+    }).subscribe({
+      next: saved => this._issues.update(is => is.map(i => (i.id === id ? saved : i))),
+      error: () => this._issues.update(is => is.filter(i => i.id !== id)),
+    });
     return issue;
   }
 
   updateIssue(id: string, patch: Partial<Issue>): void {
     const stamped = { ...patch, updatedAt: new Date().toISOString() };
     this._issues.update(is => is.map(i => (i.id === id ? { ...i, ...stamped } : i)));
-    if (environment.useMock) return;
     this.http.patch<Issue>(`${this.apiUrl}/issues/${id}`, patch).subscribe({
       next: updated => this._issues.update(is => is.map(i => (i.id === id ? updated : i))),
       error: () => this.refreshIssues(),
@@ -278,7 +286,6 @@ export class ProjectService {
     this._issues.update(is =>
       is.map(i => (i.id === id ? { ...i, status, resolution: status === 'done' ? resolution : undefined } : i)),
     );
-    if (environment.useMock) return;
     this.http.patch<Issue>(`${this.apiUrl}/issues/${id}/status`, { status, resolution }).subscribe({
       next: updated => this._issues.update(is => is.map(i => (i.id === id ? updated : i))),
       error: () => this.refreshIssues(),
@@ -306,8 +313,9 @@ export class ProjectService {
 
   addComment(issueId: string, text: string): void {
     const me = this.currentMember;
+    const tempId = crypto.randomUUID();
     const comment: Comment = {
-      id: `c${Date.now()}`,
+      id: tempId,
       issueId,
       authorId: me.id,
       authorName: me.name,
@@ -318,46 +326,23 @@ export class ProjectService {
       createdAt: new Date().toISOString(),
     };
     this._comments.update(cs => [...cs, comment]);
-    if (environment.useMock) return;
     this.http.post<Comment>(`${this.apiUrl}/issues/${issueId}/comments`, { text }).subscribe({
-      next: saved => this._comments.update(cs => cs.map(c => (c.id === comment.id ? saved : c))),
-      error: () => {},
+      next: saved => this._comments.update(cs => cs.map(c => (c.id === tempId ? saved : c))),
+      error: () => this._comments.update(cs => cs.filter(c => c.id !== tempId)),
     });
   }
 
   updateComment(commentId: string, text: string): void {
     this._comments.update(cs => cs.map(c => (c.id === commentId ? { ...c, text: text.trim() } : c)));
-    if (environment.useMock) return;
-    this.http.patch<Comment>(`${this.apiUrl}/comments/${commentId}`, { text }).subscribe({ error: () => {} });
+    this.http.patch<Comment>(`${this.apiUrl}/comments/${commentId}`, { text }).subscribe({
+      next: updated => this._comments.update(cs => cs.map(c => (c.id === commentId ? updated : c))),
+      error: () => {},
+    });
   }
 
   deleteComment(commentId: string): void {
     this._comments.update(cs => cs.filter(c => c.id !== commentId));
-    if (environment.useMock) return;
     this.http.delete(`${this.apiUrl}/comments/${commentId}`).subscribe({ error: () => {} });
-  }
-
-  // ── Mock state helpers ───────────────────────────────────────────────
-  resetMockState(): void {
-    try { localStorage.removeItem(this.STORAGE_KEY); } catch { /* ignore */ }
-    this._projects.set(MOCK_PROJECTS);
-    this._issues.set(MOCK_ISSUES);
-    this._sprints.set(MOCK_SPRINTS);
-    this._comments.set(MOCK_COMMENTS);
-  }
-
-  private readState(): { projects: Project[]; issues: Issue[]; sprints: Sprint[]; comments: Comment[] } | null {
-    try {
-      const raw = localStorage.getItem(this.STORAGE_KEY);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw);
-      if (parsed?.v !== this.STATE_VERSION || !parsed.projects || !parsed.issues || !parsed.comments) {
-        return null;
-      }
-      return parsed;
-    } catch {
-      return null;
-    }
   }
 
   private refreshIssues(): void {
