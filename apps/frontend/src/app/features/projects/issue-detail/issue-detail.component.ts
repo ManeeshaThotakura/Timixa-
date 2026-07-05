@@ -109,6 +109,10 @@ type EditField = 'priority' | 'points' | 'estimate' | 'start' | 'due' | null;
                   </span>
                   <span class="text-[13px] font-semibold text-on-surface">{{ m.name }}</span>
                 </button>
+                <button *ngIf="canCreatePerson()" (click)="createAndAssign(t)" class="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-surface-container text-left border-t border-surface-container">
+                  <span class="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center"><span class="material-symbols-outlined text-[15px]">person_add</span></span>
+                  <span class="text-[13px] font-semibold text-primary">Add “{{ assigneeQuery.trim() }}”</span>
+                </button>
               </div>
             </div>
           </div>
@@ -497,6 +501,20 @@ export class IssueDetailComponent {
   }
   chooseAssignee(issue: Issue, id: string): void { this.patch(issue, { assigneeId: id }); this.editingAssignee.set(false); }
   clearAssignee(issue: Issue): void { this.patch(issue, { assigneeId: undefined }); this.editingAssignee.set(false); }
+
+  /** True when the typed name matches no existing member — offer to create them. */
+  canCreatePerson(): boolean {
+    const q = this.assigneeQuery.trim();
+    return q.length > 0 && !this.teamMembers.some(m => m.name.toLowerCase() === q.toLowerCase());
+  }
+
+  /** Create a brand-new person (no account yet) and assign them to this issue. */
+  createAndAssign(issue: Issue): void {
+    const name = this.assigneeQuery.trim();
+    if (!name) return;
+    const member = this.service.createTeamMember(name);
+    this.chooseAssignee(issue, member.id);
+  }
 
   // ── Description ────────────────────────────────────────────────────
   startEditDesc(issue: Issue): void { this.descDraft = issue.description; this.editingDesc.set(true); }

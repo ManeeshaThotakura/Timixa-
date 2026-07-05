@@ -373,7 +373,14 @@ const PROJECT_COLORS = ['#451de3', '#00c1fd', '#006688', '#15803d', '#ba1a1a', '
                 </span>
                 <span class="text-[14px] font-semibold text-on-surface">{{ m.name }}</span>
               </button>
-              <p *ngIf="!filteredMembers().length"
+              <button *ngIf="canCreatePerson()" (click)="createAndAssign()"
+                      class="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-surface-container transition-colors text-left border-t border-surface-container">
+                <span class="w-7 h-7 rounded-full bg-primary/10 text-primary flex items-center justify-center flex-shrink-0">
+                  <span class="material-symbols-outlined text-[18px]">person_add</span>
+                </span>
+                <span class="text-[14px] font-semibold text-primary">Add “{{ assigneeQuery.trim() }}” as a new person</span>
+              </button>
+              <p *ngIf="!filteredMembers().length && !canCreatePerson()"
                  class="px-3 py-3 text-[13px] text-on-surface-variant">No people found.</p>
             </div>
           </div>
@@ -505,6 +512,20 @@ export class ProjectsDashboardComponent implements OnInit {
       this.form.assigneeIds = [...this.form.assigneeIds, id];
     }
     this.assigneeQuery = '';
+  }
+
+  /** True when the typed name doesn't match an existing member — offer to create them. */
+  canCreatePerson(): boolean {
+    const q = this.assigneeQuery.trim();
+    return q.length > 0 && !this.teamMembers.some(m => m.name.toLowerCase() === q.toLowerCase());
+  }
+
+  /** Create a brand-new person (no account yet) and assign them to this project. */
+  createAndAssign(): void {
+    const name = this.assigneeQuery.trim();
+    if (!name) return;
+    const member = this.projectService.createTeamMember(name);
+    this.addAssignee(member.id);
   }
 
   removeAssignee(id: string): void {

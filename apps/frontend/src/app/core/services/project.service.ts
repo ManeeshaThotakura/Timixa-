@@ -124,6 +124,41 @@ export class ProjectService {
     this.http.get<Comment[]>(`${this.apiUrl}/comments`).subscribe({ next: c => this._comments.set(c), error: () => {} });
   }
 
+  // ── Team ─────────────────────────────────────────────────────────────
+  /**
+   * Adds a person who has no account yet to the shared directory, so they can be
+   * assigned to projects/issues immediately. Optimistic: the new member is given a
+   * client UUID (also sent to the server) and appears in `teamMembers` right away.
+   */
+  createTeamMember(name: string, color?: string): TeamMember {
+    const id = crypto.randomUUID();
+    const trimmed = name.trim();
+    const member: TeamMember = {
+      id,
+      name: trimmed,
+      initials: this.deriveInitials(trimmed),
+      color: color ?? '#0891b2',
+    };
+    this.teamMembers.push(member);
+    this.http.post<TeamMember>(`${this.apiUrl}/team`, { id, name: trimmed, color }).subscribe({
+      next: saved => {
+        const idx = this.teamMembers.findIndex(m => m.id === id);
+        if (idx >= 0) this.teamMembers[idx] = saved;
+      },
+      error: () => {
+        const idx = this.teamMembers.findIndex(m => m.id === id);
+        if (idx >= 0) this.teamMembers.splice(idx, 1);
+      },
+    });
+    return member;
+  }
+
+  private deriveInitials(name: string): string {
+    const parts = name.trim().split(/\s+/).filter(Boolean);
+    const s = parts.length >= 2 ? parts[0][0] + parts[1][0] : name.trim().slice(0, 2);
+    return s.toUpperCase() || '?';
+  }
+
   // ── Projects ─────────────────────────────────────────────────────────
   getProjectById(id: string): Project | undefined {
     return this._projects().find(p => p.id === id);

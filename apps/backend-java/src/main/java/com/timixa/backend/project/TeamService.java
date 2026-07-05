@@ -1,6 +1,7 @@
 package com.timixa.backend.project;
 
 import com.timixa.backend.common.ResourceNotFoundException;
+import com.timixa.backend.project.dto.NewTeamMemberRequest;
 import com.timixa.backend.user.User;
 import com.timixa.backend.user.UserRepository;
 import org.springframework.stereotype.Service;
@@ -44,6 +45,20 @@ public class TeamService {
     public List<TeamMember> team(UUID userId) {
         currentMember(userId);
         return members.findAllByOrderByNameAsc();
+    }
+
+    /** Adds a person who has no account yet (a directory member with userId == null). */
+    @Transactional
+    public TeamMember createMember(NewTeamMemberRequest req) {
+        TeamMember m = new TeamMember();
+        if (req.id() != null) m.setId(req.id());
+        m.setName(req.name().trim());
+        m.setInitials(initialsOf(req.name()));
+        m.setColor(req.color() != null && !req.color().isBlank()
+            ? req.color()
+            : PALETTE[Math.floorMod(m.getName().hashCode(), PALETTE.length)]);
+        m.setAvatarUrl(req.avatarUrl());
+        return members.save(m);
     }
 
     /** All members keyed by id, for batch resolution of assignees/authors. */
