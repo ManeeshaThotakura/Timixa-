@@ -7,4 +7,8 @@ import java.util.UUID;
 
 public interface PlannedTaskRepository extends JpaRepository<PlannedTask, UUID> {
     List<PlannedTask> findByUserIdOrderByCreatedAtDesc(UUID userId);
+
+    List<PlannedTask> findByNotifyAtStartTrueAndStartTime(String startTime);
+
+    List<PlannedTask> findByNotifyAtEndTrueAndEndTime(String endTime);
 }
