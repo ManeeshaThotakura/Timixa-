@@ -7,8 +7,8 @@ spring:
     password: ${DATABASE_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
-      # CockroachDB Cloud drops idle TCP connections after ~5 min. Recycle
-      # ours sooner so Hikari never hands out a dead handle.
+      # Supabase's pooler (and most managed PG) drops idle TCP connections.
+      # Recycle ours sooner so Hikari never hands out a dead handle.
       max-lifetime: 240000        # 4 min — under Cockroach's idle drop window
       idle-timeout: 60000         # 1 min — close excess idle connections fast
       keepalive-time: 90000       # 1.5 min — ping idle connections to keep TCP alive
