@@ -11,6 +11,13 @@ export interface PlannedTaskException {
   type: ExceptionType;
 }
 
+export interface PlannedTaskSegment {
+  id: string;
+  date: string;            // YYYY-MM-DD
+  startTime: string;       // HH:mm
+  endTime: string;         // HH:mm
+}
+
 export interface PlannedTask {
   id: string;
   userId: string;
@@ -29,7 +36,11 @@ export interface PlannedTask {
   minCount?: number;
   maxCount?: number;
   exceptions: PlannedTaskException[];
+  segmentsForDate?: PlannedTaskSegment[];   // present on date-scoped GET responses
   completedToday: boolean;
+  currentCount: number;
+  notifyAtStart?: boolean;
+  notifyAtEnd?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -49,6 +60,8 @@ export interface PlannedTaskInput {
   maxTimeMinutes?: number | null;
   minCount?: number | null;
   maxCount?: number | null;
+  notifyAtStart?: boolean;
+  notifyAtEnd?: boolean;
 }
 
 export type PlannedTaskUpdate = Partial<PlannedTaskInput>;

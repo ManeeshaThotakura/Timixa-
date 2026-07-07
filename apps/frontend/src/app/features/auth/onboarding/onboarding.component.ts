@@ -79,6 +79,7 @@ export class OnboardingComponent {
     }).subscribe({
       next: () => {
         this.busy.set(false);
+        this.suppressBedtimePromptToday();
         this.router.navigateByUrl('/dashboard');
       },
       error: (err) => {
@@ -90,5 +91,12 @@ export class OnboardingComponent {
         this.errorMsg.set(err?.error?.message || 'Could not save your profile. Please try again.');
       },
     });
+  }
+
+  private suppressBedtimePromptToday(): void {
+    if (typeof sessionStorage === 'undefined') return;
+    const d = new Date();
+    const key = `timixa.bedtimePrompt.${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    sessionStorage.setItem(key, '1');
   }
 }

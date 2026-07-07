@@ -1,0 +1,2 @@
+ALTER TABLE planned_task_completions
+  ADD COLUMN IF NOT EXISTS count INT4 NOT NULL DEFAULT 1;

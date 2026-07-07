@@ -21,5 +21,16 @@ public record PlannedTaskRequest(
     @Min(1) Integer minTimeMinutes,
     @Min(1) Integer maxTimeMinutes,
     @Min(1) Integer minCount,
-    @Min(1) Integer maxCount
-) {}
+    @Min(1) Integer maxCount,
+    Boolean notifyAtStart,
+    Boolean notifyAtEnd
+) {
+    public PlannedTaskRequest(String title, String goal, String color, Cadence cadence,
+                              Boolean needsTimeSlot, String startTime, String endTime,
+                              LocalDate scheduledDate, Set<DayOfWeek> weekdays,
+                              Set<Integer> monthDays, Integer minTimeMinutes,
+                              Integer maxTimeMinutes, Integer minCount, Integer maxCount) {
+        this(title, goal, color, cadence, needsTimeSlot, startTime, endTime, scheduledDate,
+            weekdays, monthDays, minTimeMinutes, maxTimeMinutes, minCount, maxCount, null, null);
+    }
+}

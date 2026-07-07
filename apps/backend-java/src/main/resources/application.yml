@@ -13,3 +13,8 @@ app:
     expiry-seconds: 604800   # 7 days
   legacy:
     base-url: http://localhost:3000
+  push:
+    # Dev VAPID keypair — override both in prod via env.
+    public-key: ${TIMIXA_VAPID_PUBLIC:BMX_eNnCiIDMHBGvNyHJiqmjkf5E3y7IJ6r3DuZE6V5q32oDrMau1ABxnwmzhYLkSmEfe4C0yhomHgBQ1F9Q5pM}
+    private-key: ${TIMIXA_VAPID_PRIVATE:Jt4K08L-TaKz_459jPbTXZzahevblY1mlBtKmKE-gls}
+    subject: ${TIMIXA_VAPID_SUBJECT:mailto:admin@timixa.local}
