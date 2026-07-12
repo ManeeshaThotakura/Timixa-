@@ -15,7 +15,7 @@ import { IssueTypeIconComponent } from '../../../shared/components/issue-type-ic
   imports: [CommonModule, StatusBadgeComponent, PriorityBadgeComponent, IssueTypeIconComponent],
   template: `
     <div class="max-w-6xl mx-auto p-6">
-      <h1 class="text-[26px] font-extrabold text-on-surface font-manrope mb-1">Good to see you, {{ me.name.split(' ')[0] }}</h1>
+      <h1 class="text-[26px] font-extrabold text-on-surface font-manrope mb-1">Good to see you, {{ me().name.split(' ')[0] }}</h1>
       <p class="text-[14px] text-on-surface-variant mb-6">Here's what's happening across your work.</p>
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -104,12 +104,12 @@ export class DashboardComponent {
   private projectService = inject(ProjectService);
   private router = inject(Router);
   readonly activity = inject(ActivityService);
-  readonly me = this.projectService.currentMember;
+  readonly me = this.projectService.me;
 
   private boardIssues = computed(() => this.projectService.issues().filter(i => BOARD_TYPES.includes(i.type)));
 
   myStories = computed(() =>
-    this.boardIssues().filter(i => i.assigneeId === this.me.id && i.status !== 'done').slice(0, 8),
+    this.boardIssues().filter(i => i.assigneeId === this.me().id && i.status !== 'done').slice(0, 8),
   );
 
   summary = computed(() => {
@@ -117,7 +117,7 @@ export class DashboardComponent {
     const stories = issues.filter(i => BOARD_TYPES.includes(i.type));
     return {
       projects: this.projectService.projects().length,
-      epics: issues.filter(i => i.type === 'epic').length,
+      epics: issues.filter(i => i.type === 'epic' && i.status !== 'done').length,
       stories: stories.filter(i => i.status !== 'done').length,
       done: stories.filter(i => i.status === 'done').length,
     };
@@ -130,7 +130,7 @@ export class DashboardComponent {
       .slice(0, 6),
   );
 
-  constructor() { this.projectService.load(); }
+  constructor() { this.projectService.refresh(); }
 
   open(issue: Issue): void {
     this.router.navigate(['/projects', issue.projectId, 'stories', issue.id]);

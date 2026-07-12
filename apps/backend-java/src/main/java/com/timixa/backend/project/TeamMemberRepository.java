@@ -10,4 +10,5 @@ public interface TeamMemberRepository extends JpaRepository<TeamMember, UUID> {
     Optional<TeamMember> findByUserId(UUID userId);
     List<TeamMember> findAllByOrderByNameAsc();
     long countByUserIdIsNull();
+    Optional<TeamMember> findFirstByUserIdIsNullAndNameIgnoreCase(String name);
 }

@@ -57,7 +57,7 @@ import { IssueTypeIconComponent } from '../../../shared/components/issue-type-ic
 export class MyWorkComponent {
   readonly projectService = inject(ProjectService);
   private router = inject(Router);
-  private me = this.projectService.currentMember;
+  private me = this.projectService.me;
   readonly priorities = PRIORITIES;
 
   projectFilter = signal<string>('all');
@@ -65,7 +65,7 @@ export class MyWorkComponent {
 
   // ngModel writes to the signal via two-way? Use plain fields instead for template [(ngModel)].
   private mine = computed(() =>
-    this.projectService.issues().filter(i => BOARD_TYPES.includes(i.type) && i.assigneeId === this.me.id),
+    this.projectService.issues().filter(i => BOARD_TYPES.includes(i.type) && i.assigneeId === this.me().id),
   );
 
   groups = computed(() => {

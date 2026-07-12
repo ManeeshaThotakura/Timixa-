@@ -71,12 +71,22 @@ public class TeamService {
     private TeamMember provision(UUID userId) {
         User u = users.findById(userId)
             .orElseThrow(() -> new ResourceNotFoundException("User not found"));
-        TeamMember m = new TeamMember();
-        m.setUserId(userId);
-        m.setName(u.getName());
-        m.setInitials(initialsOf(u.getName()));
-        m.setColor(PALETTE[Math.floorMod(userId.hashCode(), PALETTE.length)]);
-        return members.save(m);
+        // Adopt an unclaimed directory member with the same name, so issues already
+        // assigned to that person show up as "mine" once they sign in — instead of
+        // creating a look-alike duplicate the assignee picker can't distinguish.
+        return members.findFirstByUserIdIsNullAndNameIgnoreCase(u.getName().trim())
+            .map(existing -> {
+                existing.setUserId(userId);
+                return members.save(existing);
+            })
+            .orElseGet(() -> {
+                TeamMember m = new TeamMember();
+                m.setUserId(userId);
+                m.setName(u.getName());
+                m.setInitials(initialsOf(u.getName()));
+                m.setColor(PALETTE[Math.floorMod(userId.hashCode(), PALETTE.length)]);
+                return members.save(m);
+            });
     }
 
     static String initialsOf(String name) {

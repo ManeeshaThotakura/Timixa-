@@ -1,10 +1,19 @@
 import { Injectable, signal, computed, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Project, Issue, IssueType, IssueStatus, Sprint, ProjectStats, TeamMember, Comment } from '../models/project.model';
+import { Project, Issue, IssueType, IssueStatus, Sprint, ProjectStats, TeamMember, Comment, ActivityVerb } from '../models/project.model';
 import { environment } from '../../../environments/environment';
+import { ActivityService } from './activity.service';
 
 /** Issue types that show as cards on the board (epics group them, subtasks live in stories). */
 const BOARD_TYPES: IssueType[] = ['story', 'task', 'bug'];
+
+/** Human labels for the workflow statuses, used in activity feed entries. */
+const STATUS_LABELS: Record<IssueStatus, string> = {
+  backlog: 'Backlog',
+  todo: 'To Do',
+  'in-progress': 'In Progress',
+  done: 'Done',
+};
 
 /** Fields collected by the "New Project" form. */
 export interface NewProjectInput {
@@ -64,6 +73,7 @@ interface BoardColumns {
 @Injectable({ providedIn: 'root' })
 export class ProjectService {
   private http = inject(HttpClient);
+  private activity = inject(ActivityService);
   private apiUrl = environment.apiUrl;
 
   private _projects = signal<Project[]>([]);
@@ -84,10 +94,12 @@ export class ProjectService {
   readonly teamMembers: TeamMember[] = [];
 
   /**
-   * The signed-in member (comment author). Stable object reference; its fields are
-   * filled in place once `/api/team/me` resolves.
+   * The signed-in member (comment author). A signal, so computeds that filter by
+   * "assigned to me" recompute once `/api/team/me` resolves (it can land after
+   * `/api/issues`, and a plain object mutation would leave them stale).
    */
-  readonly currentMember: TeamMember = { id: '', name: 'You', initials: '?', color: '#451de3' };
+  private _me = signal<TeamMember>({ id: '', name: 'You', initials: '?', color: '#451de3' });
+  readonly me = this._me.asReadonly();
 
   readonly stats = computed<ProjectStats>(() => {
     const projects = this._projects();
@@ -106,13 +118,22 @@ export class ProjectService {
   load(): void {
     if (this._loaded()) return;
     this._loaded.set(true);
+    this.fetchAll();
+  }
 
+  /** Refetches everything from the server, so aggregate views (dashboard) stay fresh. */
+  refresh(): void {
+    this._loaded.set(true);
+    this.fetchAll();
+  }
+
+  private fetchAll(): void {
     this.http.get<TeamMember[]>(`${this.apiUrl}/team`).subscribe({
       next: t => this.teamMembers.splice(0, this.teamMembers.length, ...t),
       error: () => {},
     });
     this.http.get<TeamMember>(`${this.apiUrl}/team/me`).subscribe({
-      next: m => Object.assign(this.currentMember, m),
+      next: m => this._me.set(m),
       error: () => {},
     });
     this.http.get<Project[]>(`${this.apiUrl}/projects`).subscribe({
@@ -189,6 +210,14 @@ export class ProjectService {
     };
 
     this._projects.update(ps => [...ps, project]);
+    const me = this._me();
+    this.activity.log({
+      projectId: id,
+      actorId: me.id,
+      actorName: me.name,
+      verb: 'created',
+      detail: `created project "${project.title}"`,
+    });
     this.http.post<Project>(`${this.apiUrl}/projects`, {
       id,
       title: project.title,
@@ -271,7 +300,7 @@ export class ProjectService {
       status: input.status ?? 'backlog',
       priority: input.priority ?? 'medium',
       assigneeId: input.assigneeId || undefined,
-      reporterId: input.reporterId ?? this.currentMember.id,
+      reporterId: input.reporterId ?? this._me().id,
       storyPoints: input.storyPoints,
       estimateHours: input.estimateHours,
       sprintId: input.sprintId,
@@ -283,6 +312,7 @@ export class ProjectService {
     };
 
     this._issues.update(is => [...is, issue]);
+    this.logIssueActivity(issue, 'created', `created the ${issue.type}`);
     this.http.post<Issue>(`${this.apiUrl}/issues`, {
       id,
       projectId: input.projectId,
@@ -309,8 +339,20 @@ export class ProjectService {
   }
 
   updateIssue(id: string, patch: Partial<Issue>): void {
+    const before = this.getIssueById(id);
     const stamped = { ...patch, updatedAt: new Date().toISOString() };
     this._issues.update(is => is.map(i => (i.id === id ? { ...i, ...stamped } : i)));
+    const after = this.getIssueById(id);
+    if (after) {
+      if (patch.assigneeId !== undefined && patch.assigneeId !== before?.assigneeId) {
+        const assignee = this.teamMembers.find(m => m.id === patch.assigneeId)?.name;
+        this.logIssueActivity(after, 'assigned', assignee ? `assigned ${assignee} to` : 'unassigned');
+      } else if (patch.status && patch.status !== before?.status) {
+        this.logStatusActivity(after, patch.status);
+      } else {
+        this.logIssueActivity(after, 'updated', 'updated');
+      }
+    }
     this.http.patch<Issue>(`${this.apiUrl}/issues/${id}`, patch).subscribe({
       next: updated => this._issues.update(is => is.map(i => (i.id === id ? updated : i))),
       error: () => this.refreshIssues(),
@@ -321,6 +363,8 @@ export class ProjectService {
     this._issues.update(is =>
       is.map(i => (i.id === id ? { ...i, status, resolution: status === 'done' ? resolution : undefined } : i)),
     );
+    const issue = this.getIssueById(id);
+    if (issue) this.logStatusActivity(issue, status);
     this.http.patch<Issue>(`${this.apiUrl}/issues/${id}/status`, { status, resolution }).subscribe({
       next: updated => this._issues.update(is => is.map(i => (i.id === id ? updated : i))),
       error: () => this.refreshIssues(),
@@ -347,7 +391,7 @@ export class ProjectService {
   }
 
   addComment(issueId: string, text: string): void {
-    const me = this.currentMember;
+    const me = this._me();
     const tempId = crypto.randomUUID();
     const comment: Comment = {
       id: tempId,
@@ -361,6 +405,8 @@ export class ProjectService {
       createdAt: new Date().toISOString(),
     };
     this._comments.update(cs => [...cs, comment]);
+    const issue = this.getIssueById(issueId);
+    if (issue) this.logIssueActivity(issue, 'commented', 'commented on');
     this.http.post<Comment>(`${this.apiUrl}/issues/${issueId}/comments`, { text }).subscribe({
       next: saved => this._comments.update(cs => cs.map(c => (c.id === tempId ? saved : c))),
       error: () => this._comments.update(cs => cs.filter(c => c.id !== tempId)),
@@ -382,5 +428,28 @@ export class ProjectService {
 
   private refreshIssues(): void {
     this.http.get<Issue[]>(`${this.apiUrl}/issues`).subscribe(i => this._issues.set(i));
+  }
+
+  // ── Activity feed ────────────────────────────────────────────────────
+  private logIssueActivity(issue: Issue, verb: ActivityVerb, detail: string): void {
+    const me = this._me();
+    this.activity.log({
+      projectId: issue.projectId,
+      actorId: me.id,
+      actorName: me.name,
+      verb,
+      issueId: issue.id,
+      issueKey: issue.key,
+      issueTitle: issue.title,
+      detail,
+    });
+  }
+
+  private logStatusActivity(issue: Issue, status: IssueStatus): void {
+    this.logIssueActivity(
+      issue,
+      status === 'done' ? 'completed' : 'status_changed',
+      status === 'done' ? 'marked as Done' : `moved to ${STATUS_LABELS[status]}`,
+    );
   }
 }

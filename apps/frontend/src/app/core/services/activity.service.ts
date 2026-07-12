@@ -1,6 +1,11 @@
 import { Injectable, signal, effect } from '@angular/core';
 import { Activity, ActivityVerb } from '../models/project.model';
-import { MOCK_ACTIVITIES } from '../mocks/projects.mock';
+
+/** Ids of the old hardcoded demo entries; purged from persisted feeds on load. */
+const LEGACY_MOCK_IDS = new Set(['a1', 'a2', 'a3', 'a4']);
+
+/** Keep the persisted feed bounded. */
+const MAX_ENTRIES = 200;
 
 @Injectable({ providedIn: 'root' })
 export class ActivityService {
@@ -9,9 +14,9 @@ export class ActivityService {
   readonly activities = this._activities.asReadonly();
 
   // Activity feed is a client-side, display-only feature for now (not part of the
-  // Core CockroachDB scope), so it always loads/persists locally regardless of backend.
+  // Core DB scope). It persists locally and is fed by ProjectService mutations.
   constructor() {
-    this._activities.set(this.read() ?? MOCK_ACTIVITIES);
+    this._activities.set(this.read() ?? []);
     effect(() => {
       const data = this._activities();
       try { localStorage.setItem(this.STORAGE_KEY, JSON.stringify(data)); } catch { /* ignore */ }
@@ -39,17 +44,18 @@ export class ActivityService {
     detail?: string;
   }): void {
     const activity: Activity = {
-      id: `a${Date.now()}`,
+      id: crypto.randomUUID(),
       createdAt: new Date().toISOString(),
       ...entry,
     };
-    this._activities.update(list => [activity, ...list]);
+    this._activities.update(list => [activity, ...list].slice(0, MAX_ENTRIES));
   }
 
   private read(): Activity[] | null {
     try {
       const raw = localStorage.getItem(this.STORAGE_KEY);
-      return raw ? (JSON.parse(raw) as Activity[]) : null;
+      if (!raw) return null;
+      return (JSON.parse(raw) as Activity[]).filter(a => !LEGACY_MOCK_IDS.has(a.id));
     } catch {
       return null;
     }

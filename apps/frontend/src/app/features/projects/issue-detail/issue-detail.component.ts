@@ -250,9 +250,9 @@ type EditField = 'priority' | 'points' | 'estimate' | 'start' | 'due' | null;
 
           <!-- Composer -->
           <div class="flex items-end gap-2 mb-5">
-            <span class="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0" [style.background]="me.color">
-              <img *ngIf="me.avatarUrl; else myi" [src]="me.avatarUrl" [alt]="me.name" class="w-full h-full object-cover" />
-              <ng-template #myi>{{ me.initials }}</ng-template>
+            <span class="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0" [style.background]="me().color">
+              <img *ngIf="me().avatarUrl; else myi" [src]="me().avatarUrl" [alt]="me().name" class="w-full h-full object-cover" />
+              <ng-template #myi>{{ me().initials }}</ng-template>
             </span>
             <div class="flex-1 relative">
               <textarea #composer [value]="newComment" (input)="onCommentInput($event, 'new')" rows="1" placeholder="Add a comment… use @ to mention"
@@ -279,7 +279,7 @@ type EditField = 'priority' | 'points' | 'estimate' | 'start' | 'due' | null;
                   <span class="text-[13px] font-bold text-on-surface">{{ c.authorName }}</span>
                   <div class="flex items-center gap-2">
                     <span class="text-[11px] text-on-surface-variant">{{ c.createdAt | date:'MMM d, h:mm a' }}</span>
-                    <ng-container *ngIf="c.authorId === me.id && editingCommentId() !== c.id">
+                    <ng-container *ngIf="c.authorId === me().id && editingCommentId() !== c.id">
                       <button (click)="startEditComment(c)" class="material-symbols-outlined text-[16px] text-outline hover:text-primary">edit</button>
                       <button (click)="removeComment(c)" class="material-symbols-outlined text-[16px] text-outline hover:text-error">delete</button>
                     </ng-container>
@@ -369,7 +369,7 @@ export class IssueDetailComponent {
   readonly boardTypes: IssueTypeDef[] = ISSUE_TYPES.filter(t => ['story', 'task', 'bug'].includes(t.id));
   readonly priorities: PriorityDef[] = PRIORITIES;
   readonly teamMembers = this.service.teamMembers;
-  readonly me = this.service.currentMember;
+  readonly me = this.service.me;
 
   issueId = signal('');
 
