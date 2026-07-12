@@ -1,6 +1,6 @@
 import { Component, Input } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { Task } from '../../../core/models/project.model';
+import { Issue } from '../../../core/models/project.model';
 
 @Component({
   selector: 'app-task-card',
@@ -37,7 +37,7 @@ import { Task } from '../../../core/models/project.model';
   `,
 })
 export class TaskCardComponent {
-  @Input() task!: Task;
+  @Input() task!: Issue;
   @Input() done = false;
 
   get priorityClass(): string {
