@@ -55,12 +55,17 @@ test('dashboard is empty when no planned tasks', async ({ page }) => {
   await expect(page.getByTestId('done-section')).toHaveCount(0);
 });
 
+// A slot that contains "now" and never rolls past midnight (23:xx → end 23:59).
+function nowWindow(): { start: string; end: string } {
+  const h = new Date().getHours();
+  const start = `${String(h).padStart(2, '0')}:00`;
+  const end = h === 23 ? '23:59' : `${String(h + 1).padStart(2, '0')}:00`;
+  return { start, end };
+}
+
 test('Now card shows for in-window DAILY task', async ({ page }) => {
   await registerAndOnboard(page);
-  const now = new Date();
-  const start = `${String(now.getHours()).padStart(2, '0')}:00`;
-  const endHour = (now.getHours() + 1) % 24;
-  const end = `${String(endHour).padStart(2, '0')}:00`;
+  const { start, end } = nowWindow();
   await createTaskViaApi(page, {
     title: 'Gym', goal: 'Fitness', cadence: 'DAILY',
     needsTimeSlot: true, startTime: start, endTime: end,
@@ -72,10 +77,7 @@ test('Now card shows for in-window DAILY task', async ({ page }) => {
 
 test('clicking Complete moves task to Done', async ({ page }) => {
   await registerAndOnboard(page);
-  const now = new Date();
-  const start = `${String(now.getHours()).padStart(2, '0')}:00`;
-  const endHour = (now.getHours() + 1) % 24;
-  const end = `${String(endHour).padStart(2, '0')}:00`;
+  const { start, end } = nowWindow();
   await createTaskViaApi(page, {
     title: 'Gym', cadence: 'DAILY',
     needsTimeSlot: true, startTime: start, endTime: end,

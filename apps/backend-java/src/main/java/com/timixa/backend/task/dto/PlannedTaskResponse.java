@@ -25,6 +25,7 @@ public record PlannedTaskResponse(
     Integer maxCount,
     List<PlannedTaskExceptionResponse> exceptions,
     List<PlannedTaskSegmentResponse> segmentsForDate,
+    List<PatternSlotResponse> patternForDate,
     boolean completedToday,
     int currentCount,
     boolean notifyAtStart,
@@ -35,6 +36,7 @@ public record PlannedTaskResponse(
             PlannedTask t,
             List<PlannedTaskExceptionResponse> exceptions,
             List<PlannedTaskSegmentResponse> segmentsForDate,
+            List<PatternSlotResponse> patternForDate,
             boolean completedToday,
             int currentCount) {
         return new PlannedTaskResponse(
@@ -50,12 +52,22 @@ public record PlannedTaskResponse(
             t.getMaxCount(),
             exceptions == null ? List.of() : exceptions,
             segmentsForDate == null ? List.of() : segmentsForDate,
+            patternForDate == null ? List.of() : patternForDate,
             completedToday,
             currentCount,
             t.isNotifyAtStart(),
             t.isNotifyAtEnd(),
             t.getCreatedAt(), t.getUpdatedAt()
         );
+    }
+
+    public static PlannedTaskResponse from(
+            PlannedTask t,
+            List<PlannedTaskExceptionResponse> exceptions,
+            List<PlannedTaskSegmentResponse> segmentsForDate,
+            boolean completedToday,
+            int currentCount) {
+        return from(t, exceptions, segmentsForDate, List.of(), completedToday, currentCount);
     }
 
     public static PlannedTaskResponse from(
