@@ -17,6 +17,10 @@ import {
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i); // 00:00 – 23:00
 
+const WEEKDAY_BY_JS_DAY: Weekday[] = [
+  'SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY',
+];
+
 // A rendered bar on the grid. Either the task's template times (segmentId=null)
 // or one of its per-date segments.
 interface DayBar extends PlannedTask {
@@ -127,6 +131,47 @@ interface DayBar extends PlannedTask {
           <div class="flex items-center justify-between text-[11px] text-on-surface-variant">
             <span class="text-outline">{{ task.cadence }}</span>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Remembered pattern preference -->
+    <div *ngIf="timePrefChoice() as pref" class="px-margin-page mt-2 flex justify-end">
+      <button type="button"
+              (click)="clearTimePref()"
+              class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold"
+              style="background:rgba(94,67,251,0.10); color:#5e43fb;"
+              data-testid="clear-time-pref">
+        {{ pref === 'yes' ? 'Auto: apply to every weekday' : 'Auto: just this date' }}
+        <span class="material-symbols-outlined text-[14px]">close</span>
+      </button>
+    </div>
+
+    <!-- Any-time tasks (no time slot required — doable whenever today) -->
+    <section *ngIf="anytimeTasks.length > 0" class="px-margin-page mt-stack-md" data-testid="anytime-strip">
+      <p class="text-label-sm font-label-sm text-on-surface-variant uppercase tracking-widest mb-2">Any time today</p>
+      <div class="flex gap-2 overflow-x-auto pb-1" style="-ms-overflow-style:none;scrollbar-width:none;">
+        <div *ngFor="let t of anytimeTasks"
+             class="flex-shrink-0 flex items-center gap-2 pl-3 pr-2 py-2 rounded-full border"
+             [style.background]="t.completedToday ? 'rgba(46,125,50,0.08)' : '#ffffff'"
+             [style.borderColor]="t.completedToday ? 'rgba(46,125,50,0.35)' : 'rgba(120,117,136,0.25)'"
+             [attr.data-testid]="'anytime-' + t.id">
+          <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" [style.background]="t.color"></span>
+          <span class="text-[13px] font-semibold text-on-surface whitespace-nowrap"
+                [class.line-through]="t.completedToday">{{ t.title }}</span>
+          <span *ngIf="targetCountOf(t) > 1"
+                class="text-[11px] font-bold" style="color:#5e43fb;">
+            {{ t.currentCount }}/{{ targetCountOf(t) }}
+          </span>
+          <button *ngIf="!t.completedToday"
+                  type="button"
+                  (click)="incrementAnytime(t.id)"
+                  class="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0"
+                  style="background:rgba(94,67,251,0.12); color:#5e43fb;"
+                  [attr.data-testid]="'anytime-done-' + t.id">
+            <span class="material-symbols-outlined text-[15px]">{{ targetCountOf(t) > 1 ? 'add' : 'check' }}</span>
+          </button>
+          <span *ngIf="t.completedToday" class="material-symbols-outlined text-[16px]" style="color:#2e7d32;">check_circle</span>
         </div>
       </div>
     </section>
@@ -317,8 +362,9 @@ interface DayBar extends PlannedTask {
       [title]="popupTitle()"
       [yesLabel]="popupYesLabel()"
       [noLabel]="popupNoLabel()"
-      (yes)="onPopupYes()"
-      (no)="onPopupNo()">
+      [showRemember]="popupShowRemember()"
+      (yes)="onPopupYes($event)"
+      (no)="onPopupNo($event)">
     </app-exception-popup>
 
     <!-- Delete bin -->
@@ -386,8 +432,11 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
   popupTitle = signal('');
   popupYesLabel = signal('Yes, every week');
   popupNoLabel = signal('No, just this date');
-  private popupOnYes: (() => void) | null = null;
-  private popupOnNo: (() => void) | null = null;
+  popupShowRemember = signal(false);
+  private popupOnYes: ((remember: boolean) => void) | null = null;
+  private popupOnNo: ((remember: boolean) => void) | null = null;
+  // 'yes' = always save as weekly pattern, 'no' = always just this date. Reset on leaving the page.
+  timePrefChoice = signal<'yes' | 'no' | null>(null);
 
   frequencyWarnings = computed<FrequencyWarning[]>(() => {
     const list = this.tasksForDay();
@@ -440,13 +489,32 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
     return [...all.filter(t => t.id === id), ...all.filter(t => t.id !== id)];
   }
 
+  get anytimeTasks(): PlannedTask[] {
+    return this.tasksForDay().filter(
+      t => !t.needsTimeSlot && (t.segmentsForDate?.length ?? 0) === 0 && (t.patternForDate?.length ?? 0) === 0,
+    );
+  }
+
+  targetCountOf(t: PlannedTask): number {
+    return Math.max(1, t.minCount ?? 1);
+  }
+
+  incrementAnytime(id: string): void {
+    this.plannedTasks.increment(id, 1, this.dateStr).subscribe(() => this.reload());
+  }
+
   get todayEvents(): DayBar[] {
     const out: DayBar[] = [];
     for (const t of this.tasksForDay()) {
       const segs = t.segmentsForDate ?? [];
+      const pattern = t.patternForDate ?? [];
       if (segs.length > 0) {
         for (const s of segs) {
           out.push({ ...t, _segmentId: s.id, startTime: s.startTime, endTime: s.endTime });
+        }
+      } else if (pattern.length > 0) {
+        for (const p of pattern) {
+          out.push({ ...t, _segmentId: null, startTime: p.startTime, endTime: p.endTime });
         }
       } else if (t.startTime && t.endTime) {
         out.push({ ...t, _segmentId: null });
@@ -459,6 +527,10 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
     const segs = t.segmentsForDate ?? [];
     if (segs.length > 0) {
       return segs.reduce((sum, s) => sum + this.diffMinutes(s.startTime, s.endTime), 0);
+    }
+    const pat = t.patternForDate ?? [];
+    if (pat.length > 0) {
+      return pat.reduce((sum, p) => sum + this.diffMinutes(p.startTime, p.endTime), 0);
     }
     if (t.startTime && t.endTime) return this.diffMinutes(t.startTime, t.endTime);
     return 0;
@@ -747,25 +819,88 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
     const dur = remaining > 0 ? remaining : (task.minTimeMinutes ?? 15);
     const end = this.addMinutesToTime(start, dur);
 
+    // Day-independent scheduling: only THIS date changes. Windows the date inherits
+    // (weekday pattern or template times) are materialized as segments first.
     const segs = task.segmentsForDate ?? [];
-    if (segs.length === 0 && task.startTime && task.endTime) {
-      // Template times currently render the day's bar. Lift them into a segment first so
-      // they don't disappear when we add the new chunk (segments replace template render).
-      this.plannedTasks.createSegment(task.id, date, task.startTime, task.endTime).subscribe({
-        next: () => this.plannedTasks.createSegment(task.id, date, start, end)
-          .subscribe(() => this.reload()),
-        error: () => this.plannedTasks.createSegment(task.id, date, start, end)
-          .subscribe(() => this.reload()),
-      });
-    } else if (segs.length === 0 && !task.startTime) {
-      // First time scheduling. Set template times so the task has a default for other dates.
-      this.plannedTasks.update(task.id, { startTime: start, endTime: end, needsTimeSlot: true })
+    const inherited = segs.length > 0 ? [] : this.windowsOf(task);
+    const ops: (() => Observable<unknown>)[] = inherited.map(w =>
+      () => this.plannedTasks.createSegment(task.id, date, w.startTime, w.endTime));
+    ops.push(() => this.plannedTasks.createSegment(task.id, date, start, end));
+    this.chainOps(ops, () => {
+      this.reload();
+      this.afterLayoutChange(task.id, date);
+    });
+  }
+
+  // ── Weekly pattern: day-independent edits + "apply to every X" ───────
+  private chainOps(ops: (() => Observable<unknown>)[], done: () => void): void {
+    if (ops.length === 0) { done(); return; }
+    const head = ops.shift()!;
+    head().subscribe({
+      next: () => this.chainOps(ops, done),
+      error: () => this.chainOps(ops, done),
+    });
+  }
+
+  private windowsOf(entry: PlannedTask): { startTime: string; endTime: string }[] {
+    const segs = entry.segmentsForDate ?? [];
+    if (segs.length) return segs.map(s => ({ startTime: s.startTime, endTime: s.endTime }));
+    const pat = entry.patternForDate ?? [];
+    if (pat.length) return pat.map(p => ({ startTime: p.startTime, endTime: p.endTime }));
+    if (entry.startTime && entry.endTime) return [{ startTime: entry.startTime, endTime: entry.endTime }];
+    return [];
+  }
+
+  private weekdayNameOf(dateStr: string): string {
+    return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long' });
+  }
+
+  private afterLayoutChange(taskId: string, dateStr: string): void {
+    if (this.timePrefChoice() === 'no') return;
+    if (this.timePrefChoice() === 'yes') { this.savePattern(taskId, dateStr); return; }
+    const day = this.weekdayNameOf(dateStr);
+    this.openPopup(
+      `Apply ${day}'s slots to every ${day}?`,
+      `Yes, every ${day}`,
+      'No, just this date',
+      remember => {
+        if (remember) this.timePrefChoice.set('yes');
+        this.savePattern(taskId, dateStr);
+      },
+      remember => {
+        if (remember) this.timePrefChoice.set('no');
+      },
+      true,
+    );
+  }
+
+  private savePattern(taskId: string, dateStr: string): void {
+    this.plannedTasks.loadForDate(dateStr).subscribe(list => {
+      const t = list.find(x => x.id === taskId);
+      if (!t) return;
+      const slots = (t.segmentsForDate ?? [])
+        .map(s => ({ startTime: s.startTime, endTime: s.endTime }))
+        .sort((a, b) => (a.startTime < b.startTime ? -1 : 1));
+      const weekday = WEEKDAY_BY_JS_DAY[new Date(dateStr + 'T00:00:00').getDay()];
+      this.plannedTasks.setWeekPattern(taskId, weekday, slots, dateStr)
         .subscribe(() => this.reload());
-    } else {
-      // Already has segments — just add another.
-      this.plannedTasks.createSegment(task.id, date, start, end)
-        .subscribe(() => this.reload());
-    }
+    });
+  }
+
+  clearTimePref(): void {
+    this.timePrefChoice.set(null);
+  }
+
+  private applyEditToNullBar(bar: DayBar, dateStr: string,
+                             originalStart: string, newStart: string, newEnd: string): void {
+    const others = this.windowsOf(bar).filter(w => w.startTime !== originalStart);
+    const ops: (() => Observable<unknown>)[] = others.map(w =>
+      () => this.plannedTasks.createSegment(bar.id, dateStr, w.startTime, w.endTime));
+    ops.push(() => this.plannedTasks.createSegment(bar.id, dateStr, newStart, newEnd));
+    this.chainOps(ops, () => {
+      this.reload();
+      this.afterLayoutChange(bar.id, dateStr);
+    });
   }
 
   // ── Resize handle — pointer-event based for mouse + touch in one path ──
@@ -838,12 +973,15 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
         const newEnd = this.addMinutesToTime(bar.startTime!, this.pixelsToMinutes(currentH));
         if (bar._segmentId) {
           this.plannedTasks.updateSegment(bar.id, bar._segmentId, { endTime: newEnd })
-            .subscribe(() => this.reload());
+            .subscribe(() => {
+              this.reload();
+              this.afterLayoutChange(bar.id, this.dateStr);
+            });
         } else if (bar.cadence === 'ONCE') {
           this.plannedTasks.update(bar.id, { endTime: newEnd })
             .subscribe(() => this.reload());
         } else {
-          this.askTimePopupFor(bar, this.dateStr, bar.startTime!, newEnd);
+          this.applyEditToNullBar(bar, this.dateStr, bar.startTime!, bar.startTime!, newEnd);
         }
       });
     };
@@ -861,32 +999,6 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
     });
 
     this._cancelResize = () => finish(false);
-  }
-
-  private askTimePopupFor(task: PlannedTask, date: string, start: string, newEnd: string): void {
-    const unit = this.cadenceUnitLabel(task, date);
-    this.openPopup(
-      `Apply this time to every ${unit}?`,
-      `Yes, every ${unit}`,
-      'No, just this date',
-      () => this.plannedTasks.update(task.id, { startTime: start, endTime: newEnd })
-        .subscribe(() => this.reload()),
-      () => this.plannedTasks.createSegment(task.id, date, start, newEnd)
-        .subscribe(() => this.reload()),
-    );
-  }
-
-  private cadenceUnitLabel(task: PlannedTask, dateIso: string): string {
-    if (task.cadence === 'DAILY') return 'day';
-    if (task.cadence === 'WEEKLY') {
-      const wd = new Date(dateIso + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long' });
-      return wd;
-    }
-    if (task.cadence === 'MONTHLY') {
-      const day = new Date(dateIso + 'T00:00:00').getDate();
-      return `day ${day} of the month`;
-    }
-    return 'occurrence';
   }
 
   // ── Pointer interaction: tap → select, drag (when selected) → move ─
@@ -990,12 +1102,15 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
           const bar = drag.evt as DayBar;
           if (bar._segmentId) {
             this.plannedTasks.updateSegment(bar.id, bar._segmentId, { startTime: newStart, endTime: newEnd })
-              .subscribe(() => this.reload());
+              .subscribe(() => {
+                this.reload();
+                this.afterLayoutChange(bar.id, this.dateStr);
+              });
           } else if (bar.cadence === 'ONCE') {
             this.plannedTasks.update(bar.id, { startTime: newStart, endTime: newEnd })
               .subscribe(() => this.reload());
           } else {
-            this.askTimePopupFor(bar, this.dateStr, newStart, newEnd);
+            this.applyEditToNullBar(bar, this.dateStr, bar.startTime!, newStart, newEnd);
           }
         }
       }
@@ -1052,6 +1167,7 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
             this.slotPopupBusy.set(false);
             this.closeSlotPopup();
             this.reload();
+            this.afterLayoutChange(e.taskId, e.date);
           },
           error: (err) => onError(err, 'Could not create the slot.'),
         });
@@ -1245,28 +1361,31 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
       this.plannedTasks.updateSegment(bar.id, bar._segmentId, {
         startTime: this.editStart,
         endTime: this.editEnd,
-      }).subscribe(() => this.reload());
+      }).subscribe(() => {
+        this.reload();
+        this.afterLayoutChange(bar.id, this.dateStr);
+      });
     } else if (bar.cadence === 'ONCE') {
       this.plannedTasks.update(bar.id, {
         startTime: this.editStart,
         endTime: this.editEnd,
       }).subscribe(() => this.reload());
     } else {
-      this.askTimePopupFor(bar, this.dateStr, this.editStart, this.editEnd);
+      this.applyEditToNullBar(bar, this.dateStr, bar.startTime ?? this.editStart, this.editStart, this.editEnd);
     }
   }
 
   // ── Skip popup handlers ──────────────────────────────────────────────
-  onPopupYes(): void {
+  onPopupYes(remember = false): void {
     this.popupVisible.set(false);
-    if (this.popupOnYes) this.popupOnYes();
+    if (this.popupOnYes) this.popupOnYes(remember);
     this.popupOnYes = null;
     this.popupOnNo = null;
   }
 
-  onPopupNo(): void {
+  onPopupNo(remember = false): void {
     this.popupVisible.set(false);
-    if (this.popupOnNo) this.popupOnNo();
+    if (this.popupOnNo) this.popupOnNo(remember);
     this.popupOnYes = null;
     this.popupOnNo = null;
   }
@@ -1275,12 +1394,14 @@ export class ScheduleDayComponent implements OnInit, OnDestroy {
     title: string,
     yesLabel: string,
     noLabel: string,
-    onYes: () => void,
-    onNo: () => void,
+    onYes: (remember: boolean) => void,
+    onNo: (remember: boolean) => void,
+    showRemember = false,
   ): void {
     this.popupTitle.set(title);
     this.popupYesLabel.set(yesLabel);
     this.popupNoLabel.set(noLabel);
+    this.popupShowRemember.set(showRemember);
     this.popupOnYes = onYes;
     this.popupOnNo = onNo;
     this.popupVisible.set(true);

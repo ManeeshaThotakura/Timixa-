@@ -65,14 +65,14 @@ class PlannedTaskServiceTest {
     }
 
     @Test
-    void create_rejects_weekly_without_weekdays() {
+    void create_allows_floating_weekly_without_weekdays() {
         PlannedTaskRequest req = new PlannedTaskRequest(
             "X", null, null, Cadence.WEEKLY, true,
             null, null, null, null, null,
             null, null, null, null);
-        assertThatThrownBy(() -> service.create(userId, req))
-            .isInstanceOf(IllegalArgumentException.class)
-            .hasMessageContaining("WEEKLY");
+        var created = service.create(userId, req);
+        assertThat(created.cadence()).isEqualTo(Cadence.WEEKLY);
+        assertThat(created.weekdays()).isNull();
     }
 
     @Test

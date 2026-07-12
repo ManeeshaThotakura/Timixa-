@@ -66,7 +66,7 @@ class PlannedTaskControllerTest {
     }
 
     @Test
-    void post_400_for_weekly_without_weekdays() throws Exception {
+    void post_201_for_floating_weekly_without_weekdays() throws Exception {
         PlannedTaskRequest req = new PlannedTaskRequest(
             "Run", null, null, Cadence.WEEKLY, true,
             "07:00", "08:00", null, null, null,
@@ -75,8 +75,9 @@ class PlannedTaskControllerTest {
                 .header("Authorization", "Bearer " + token)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json.writeValueAsString(req)))
-           .andExpect(status().isBadRequest())
-           .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+           .andExpect(status().isCreated())
+           .andExpect(jsonPath("$.cadence").value("WEEKLY"))
+           .andExpect(jsonPath("$.weekdays").doesNotExist());
     }
 
     @Test
