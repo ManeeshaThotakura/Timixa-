@@ -4,6 +4,7 @@ import { Observable, forkJoin, of, switchMap, tap } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import {
   ExceptionType,
+  PatternSlot,
   PlannedTask,
   PlannedTaskInput,
   PlannedTaskUpdate,
@@ -133,7 +134,18 @@ export class PlannedTaskService {
   increment(id: string, delta: number = 1, date: string = todayIso()): Observable<PlannedTask> {
     return this.http
       .post<PlannedTask>(`${this.base}/${id}/increment`, { date, delta })
-      .pipe(tap(updated => this._tasks.update(list => list.map(t => (t.id === id ? updated : t)))));
+      .pipe(
+        tap(updated =>
+          this._tasks.update(list =>
+            list.map(t => {
+              if (t.id !== id) return t;
+              // Concurrent taps: responses can arrive out of order — counts only
+              // grow within a day, so keep whichever response is further along.
+              return updated.currentCount >= t.currentCount ? updated : t;
+            }),
+          ),
+        ),
+      );
   }
 
   uncomplete(id: string, date: string = todayIso()): Observable<void> {
@@ -189,6 +201,18 @@ export class PlannedTaskService {
       .pipe(tap(updated => this._tasks.update(list => list.map(t => (t.id === taskId ? updated : t)))));
   }
 
+  setWeekPattern(
+    taskId: string,
+    weekday: Weekday,
+    slots: PatternSlot[],
+    date?: string,
+  ): Observable<PlannedTask> {
+    const url = `${this.base}/${taskId}/week-pattern/${weekday}${date ? `?date=${date}` : ''}`;
+    return this.http
+      .put<PlannedTask>(url, slots)
+      .pipe(tap(updated => this._tasks.update(list => list.map(t => (t.id === taskId ? updated : t)))));
+  }
+
   deleteSegment(taskId: string, segmentId: string): Observable<PlannedTask> {
     return this.http
       .delete<PlannedTask>(`${this.base}/${taskId}/segments/${segmentId}`)
@@ -215,7 +239,7 @@ export class PlannedTaskService {
     this.tickHandle = null;
   }
 
-  private loadOne(id: string): Observable<PlannedTask> {
+  loadOne(id: string): Observable<PlannedTask> {
     return this.http.get<PlannedTask>(`${this.base}/${id}`);
   }
 }

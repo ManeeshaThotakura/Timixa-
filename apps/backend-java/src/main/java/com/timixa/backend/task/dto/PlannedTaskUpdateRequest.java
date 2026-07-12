@@ -18,10 +18,10 @@ public record PlannedTaskUpdateRequest(
     LocalDate scheduledDate,
     Set<DayOfWeek> weekdays,
     Set<@Min(1) @Max(31) Integer> monthDays,
-    @Min(1) Integer minTimeMinutes,
-    @Min(1) Integer maxTimeMinutes,
-    @Min(1) Integer minCount,
-    @Min(1) Integer maxCount,
+    @Min(0) Integer minTimeMinutes,
+    @Min(0) Integer maxTimeMinutes,
+    @Min(0) Integer minCount,
+    @Min(0) Integer maxCount,
     Boolean notifyAtStart,
     Boolean notifyAtEnd
 ) {}
