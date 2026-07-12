@@ -2,6 +2,7 @@ package com.timixa.backend.task;
 
 import com.timixa.backend.common.TaskAlreadyCompleteException;
 import com.timixa.backend.common.TaskNotFoundException;
+import com.timixa.backend.task.dto.PatternSlotResponse;
 import com.timixa.backend.task.dto.PlannedTaskExceptionResponse;
 import com.timixa.backend.task.dto.PlannedTaskRequest;
 import com.timixa.backend.task.dto.PlannedTaskResponse;
@@ -21,15 +22,18 @@ public class PlannedTaskService {
     private final PlannedTaskCompletionRepository completions;
     private final PlannedTaskExceptionRepository exceptions;
     private final PlannedTaskSegmentRepository segments;
+    private final PlannedTaskWeekSlotRepository weekSlots;
 
     public PlannedTaskService(PlannedTaskRepository tasks,
                               PlannedTaskCompletionRepository completions,
                               PlannedTaskExceptionRepository exceptions,
-                              PlannedTaskSegmentRepository segments) {
+                              PlannedTaskSegmentRepository segments,
+                              PlannedTaskWeekSlotRepository weekSlots) {
         this.tasks = tasks;
         this.completions = completions;
         this.exceptions = exceptions;
         this.segments = segments;
+        this.weekSlots = weekSlots;
     }
 
     @Transactional
@@ -85,6 +89,7 @@ public class PlannedTaskService {
             .toList();
         Map<UUID, List<PlannedTaskExceptionResponse>> exMap = exceptionsByTask(filtered);
         Map<UUID, List<PlannedTaskSegmentResponse>> segMap = segmentsForDate(filtered, date);
+        Map<UUID, List<PatternSlotResponse>> patternMap = patternForWeekday(filtered, date.getDayOfWeek());
         Map<UUID, Integer> countByTask = countsForDate(filtered, date);
         return filtered.stream()
             .map(t -> {
@@ -94,10 +99,23 @@ public class PlannedTaskService {
                     t,
                     exMap.getOrDefault(t.getId(), List.of()),
                     segMap.getOrDefault(t.getId(), List.of()),
+                    patternMap.getOrDefault(t.getId(), List.of()),
                     completed,
                     currentCount);
             })
             .toList();
+    }
+
+    private Map<UUID, List<PatternSlotResponse>> patternForWeekday(List<PlannedTask> list, java.time.DayOfWeek dow) {
+        if (list.isEmpty()) return Map.of();
+        List<UUID> ids = list.stream().map(PlannedTask::getId).toList();
+        Map<UUID, List<PatternSlotResponse>> out = new HashMap<>();
+        for (PlannedTaskWeekSlot s : weekSlots.findByTaskIdInAndWeekday(ids, dow)) {
+            out.computeIfAbsent(s.getTaskId(), k -> new ArrayList<>())
+               .add(PatternSlotResponse.from(s));
+        }
+        out.values().forEach(l -> l.sort(java.util.Comparator.comparing(PatternSlotResponse::startTime)));
+        return out;
     }
 
     public static int targetFor(PlannedTask t) {
@@ -135,10 +153,15 @@ public class PlannedTaskService {
             .map(PlannedTaskExceptionResponse::from).toList();
         List<PlannedTaskSegmentResponse> seg = segments.findByTaskIdAndSegmentDate(t.getId(), date).stream()
             .map(PlannedTaskSegmentResponse::from).toList();
+        List<PatternSlotResponse> pattern = weekSlots
+            .findByTaskIdAndWeekday(t.getId(), date.getDayOfWeek()).stream()
+            .map(PatternSlotResponse::from)
+            .sorted(java.util.Comparator.comparing(PatternSlotResponse::startTime))
+            .toList();
         int currentCount = completions.findByTaskIdAndCompletedDate(t.getId(), date)
             .map(PlannedTaskCompletion::getCount).orElse(0);
         boolean completed = currentCount >= targetFor(t);
-        return PlannedTaskResponse.from(t, ex, seg, completed, currentCount);
+        return PlannedTaskResponse.from(t, ex, seg, pattern, completed, currentCount);
     }
 
     @Transactional
@@ -147,17 +170,30 @@ public class PlannedTaskService {
         if (req.title() != null) t.setTitle(req.title());
         if (req.goal() != null) t.setGoal(req.goal());
         if (req.color() != null) t.setColor(req.color());
-        if (req.cadence() != null) t.setCadence(req.cadence());
-        if (req.needsTimeSlot() != null) t.setNeedsTimeSlot(req.needsTimeSlot());
+        if (req.cadence() != null && req.cadence() != t.getCadence()) {
+            t.setCadence(req.cadence());
+            // Day-selectors of the old cadence would fail validation under the new one.
+            switch (req.cadence()) {
+                case DAILY -> { t.setScheduledDate(null); t.setWeekdaysSet(null); t.setMonthDaysSet(null); }
+                case WEEKLY -> { t.setScheduledDate(null); t.setMonthDaysSet(null); }
+                case MONTHLY -> { t.setScheduledDate(null); t.setWeekdaysSet(null); }
+                case ONCE -> { t.setWeekdaysSet(null); t.setMonthDaysSet(null); }
+            }
+        }
+        if (req.needsTimeSlot() != null) {
+            t.setNeedsTimeSlot(req.needsTimeSlot());
+            if (!req.needsTimeSlot()) { t.setStartTime(null); t.setEndTime(null); }
+        }
         if (req.startTime() != null) t.setStartTime(req.startTime());
         if (req.endTime() != null) t.setEndTime(req.endTime());
         if (req.scheduledDate() != null) t.setScheduledDate(req.scheduledDate());
         if (req.weekdays() != null) t.setWeekdaysSet(req.weekdays());
         if (req.monthDays() != null) t.setMonthDaysSet(req.monthDays());
-        if (req.minTimeMinutes() != null) t.setMinTimeMinutes(req.minTimeMinutes());
-        if (req.maxTimeMinutes() != null) t.setMaxTimeMinutes(req.maxTimeMinutes());
-        if (req.minCount() != null) t.setMinCount(req.minCount());
-        if (req.maxCount() != null) t.setMaxCount(req.maxCount());
+        // 0 = explicit "clear this constraint" (PATCH JSON can't distinguish null from absent).
+        if (req.minTimeMinutes() != null) t.setMinTimeMinutes(req.minTimeMinutes() == 0 ? null : req.minTimeMinutes());
+        if (req.maxTimeMinutes() != null) t.setMaxTimeMinutes(req.maxTimeMinutes() == 0 ? null : req.maxTimeMinutes());
+        if (req.minCount() != null) t.setMinCount(req.minCount() == 0 ? null : req.minCount());
+        if (req.maxCount() != null) t.setMaxCount(req.maxCount() == 0 ? null : req.maxCount());
         if (req.notifyAtStart() != null) t.setNotifyAtStart(req.notifyAtStart());
         if (req.notifyAtEnd() != null) t.setNotifyAtEnd(req.notifyAtEnd());
         validate(t);
@@ -186,11 +222,16 @@ public class PlannedTaskService {
     public PlannedTaskResponse increment(UUID userId, UUID taskId, LocalDate date, int delta) {
         if (delta < 1) delta = 1;
         PlannedTask t = requireOwnedTask(userId, taskId);
-        PlannedTaskCompletion c = completions.findByTaskIdAndCompletedDate(t.getId(), date)
-            .orElseGet(() -> new PlannedTaskCompletion(t.getId(), date, 0, Instant.now()));
-        c.setCount(c.getCount() + delta);
-        c.setCompletedAt(Instant.now());
-        completions.save(c);
+        // Atomic in-database increment — concurrent taps must not lose updates.
+        int updated = completions.incrementCount(t.getId(), date, delta, Instant.now());
+        if (updated == 0) {
+            try {
+                completions.save(new PlannedTaskCompletion(t.getId(), date, delta, Instant.now()));
+            } catch (org.springframework.dao.DataIntegrityViolationException e) {
+                // Lost the insert race to a concurrent request — fall back to increment.
+                completions.incrementCount(t.getId(), date, delta, Instant.now());
+            }
+        }
         return findOneForDate(userId, t.getId(), date);
     }
 
@@ -206,6 +247,7 @@ public class PlannedTaskService {
         completions.deleteByTaskId(taskId);
         exceptions.deleteByTaskId(taskId);
         segments.deleteByTaskId(taskId);
+        weekSlots.deleteByTaskId(taskId);
         tasks.delete(t);
     }
 
@@ -296,14 +338,13 @@ public class PlannedTaskService {
                     throw new IllegalArgumentException("DAILY tasks must not set scheduledDate, weekdays, or monthDays");
             }
             case WEEKLY -> {
-                if (t.getWeekdaysSet().isEmpty())
-                    throw new IllegalArgumentException("WEEKLY tasks require non-empty weekdays");
+                // Empty weekdays = "floating" weekly task: applies to no day until the
+                // user schedules it (ADD exception / segment via the schedule FAB).
                 if (t.getScheduledDate() != null || !t.getMonthDaysSet().isEmpty())
                     throw new IllegalArgumentException("WEEKLY tasks must not set scheduledDate or monthDays");
             }
             case MONTHLY -> {
-                if (t.getMonthDaysSet().isEmpty())
-                    throw new IllegalArgumentException("MONTHLY tasks require non-empty monthDays");
+                // Empty monthDays = floating monthly task (see WEEKLY above).
                 if (t.getScheduledDate() != null || !t.getWeekdaysSet().isEmpty())
                     throw new IllegalArgumentException("MONTHLY tasks must not set scheduledDate or weekdays");
             }

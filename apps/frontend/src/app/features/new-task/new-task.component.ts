@@ -1,9 +1,10 @@
-import { Component, signal, computed, inject } from '@angular/core';
+import { Component, OnInit, signal, computed, inject } from '@angular/core';
 import { CommonModule, Location } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { PlannedTaskService } from '../../core/services/planned-task.service';
 import {
+  PlannedTask,
   PlannedTaskCadence,
   PlannedTaskInput,
   Weekday,
@@ -28,7 +29,7 @@ const GOAL_ICONS: Record<string, string> = {
                 class="p-2 -ml-2 text-on-surface-variant hover:bg-surface-container rounded-full transition-colors active:scale-95 duration-200">
           <span class="material-symbols-outlined text-[24px]">close</span>
         </button>
-        <h1 class="text-lg font-extrabold text-on-surface" style="font-family:Manrope;">New Task</h1>
+        <h1 class="text-lg font-extrabold text-on-surface" style="font-family:Manrope;">{{ editingTaskId() ? 'Edit Task' : 'New Task' }}</h1>
       </div>
       <button (click)="createTask()"
               [disabled]="!taskName().trim() || saving()"
@@ -324,13 +325,71 @@ const GOAL_ICONS: Record<string, string> = {
     </div>
   `,
 })
-export class NewTaskComponent {
+export class NewTaskComponent implements OnInit {
   private plannedTasks = inject(PlannedTaskService);
   private location     = inject(Location);
   private router       = inject(Router);
+  private route        = inject(ActivatedRoute);
 
   saving = signal(false);
   error  = signal<string | null>(null);
+  editingTaskId = signal<string | null>(null);
+
+  ngOnInit(): void {
+    const taskId = this.route.snapshot.queryParamMap.get('taskId');
+    if (!taskId) return;
+    this.plannedTasks.loadOne(taskId).subscribe({
+      next: t => {
+        this.editingTaskId.set(taskId);
+        this.prefill(t);
+      },
+      error: () => this.error.set('Could not load the task to edit.'),
+    });
+  }
+
+  private prefill(t: PlannedTask): void {
+    this.taskName.set(t.title);
+    if (t.goal) {
+      if (!this.goals().includes(t.goal)) this.goals.update(g => [...g, t.goal!]);
+      this.selectedGoal.set(t.goal);
+    }
+    this.needsTimeSlot.set(t.needsTimeSlot);
+    this.notifyAtStart.set(t.notifyAtStart ?? false);
+    this.notifyAtEnd.set(t.notifyAtEnd ?? false);
+
+    this.timeConstraintEnabled.set(t.minTimeMinutes != null || t.maxTimeMinutes != null);
+    this.minTimeMinutes.set(t.minTimeMinutes ?? null);
+    this.maxTimeMinutes.set(t.maxTimeMinutes ?? null);
+    this.countConstraintEnabled.set(t.minCount != null || t.maxCount != null);
+    this.minCount.set(t.minCount ?? null);
+    this.maxCount.set(t.maxCount ?? null);
+
+    const cfg: ScheduleConfig = { ...defaultScheduleConfig };
+    const backToPicker: Record<Weekday, 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'> = {
+      MONDAY: 'mon', TUESDAY: 'tue', WEDNESDAY: 'wed', THURSDAY: 'thu',
+      FRIDAY: 'fri', SATURDAY: 'sat', SUNDAY: 'sun',
+    };
+    switch (t.cadence) {
+      case 'ONCE':
+        cfg.frequency = 'never';
+        cfg.startDate = t.scheduledDate;
+        break;
+      case 'WEEKLY':
+        cfg.frequency = 'weekly';
+        cfg.weeklyDays = (t.weekdays ?? []).map(d => backToPicker[d]);
+        break;
+      case 'MONTHLY':
+        cfg.frequency = 'monthly';
+        cfg.monthlyDay = t.monthDays?.[0];
+        break;
+      default:
+        cfg.frequency = 'daily';
+        cfg.dailyOption = 'every-day';
+    }
+    cfg.startTime = t.startTime;
+    cfg.endTime = t.endTime;
+    this.scheduleConfig.set(cfg);
+  }
 
   goals             = signal<string[]>(['Fitness', 'Learning', 'Health']);
   selectedGoal      = signal<string>('Fitness');
@@ -433,6 +492,30 @@ export class NewTaskComponent {
     const input = this.toPlannedTaskInput(title);
     this.saving.set(true);
     this.error.set(null);
+
+    const editId = this.editingTaskId();
+    if (editId) {
+      // PATCH semantics ignore nulls, so disabled constraints are cleared with 0.
+      const patch = {
+        ...input,
+        minTimeMinutes: input.minTimeMinutes ?? 0,
+        maxTimeMinutes: input.maxTimeMinutes ?? 0,
+        minCount: input.minCount ?? 0,
+        maxCount: input.maxCount ?? 0,
+      };
+      this.plannedTasks.update(editId, patch).subscribe({
+        next: () => {
+          this.saving.set(false);
+          this.router.navigateByUrl('/tasks');
+        },
+        error: (err) => {
+          this.saving.set(false);
+          this.error.set(err?.error?.message || 'Could not save changes. Please try again.');
+        },
+      });
+      return;
+    }
+
     this.plannedTasks.create(input).subscribe({
       next: () => {
         this.saving.set(false);
@@ -480,7 +563,17 @@ export class NewTaskComponent {
       case 'yearly':
       case 'daily':
       default:
-        cadence = 'DAILY';
+        // "Daily" with a Weekdays/Weekends preset is really a WEEKLY task on
+        // those days — plain DAILY would apply to all 7 days.
+        if (cfg.frequency === 'daily' && cfg.dailyOption === 'weekdays') {
+          cadence = 'WEEKLY';
+          weekdays = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
+        } else if (cfg.frequency === 'daily' && cfg.dailyOption === 'weekends') {
+          cadence = 'WEEKLY';
+          weekdays = ['SATURDAY', 'SUNDAY'];
+        } else {
+          cadence = 'DAILY';
+        }
         break;
     }
 

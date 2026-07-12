@@ -29,6 +29,15 @@ public interface PlannedTaskCompletionRepository
 
     @Modifying
     @Transactional
+    @Query("UPDATE PlannedTaskCompletion c SET c.count = c.count + :delta, c.completedAt = :now "
+        + "WHERE c.taskId = :taskId AND c.completedDate = :date")
+    int incrementCount(@Param("taskId") UUID taskId,
+                       @Param("date") LocalDate date,
+                       @Param("delta") int delta,
+                       @Param("now") java.time.Instant now);
+
+    @Modifying
+    @Transactional
     void deleteByTaskIdAndCompletedDate(UUID taskId, LocalDate completedDate);
 
     @Modifying

@@ -18,6 +18,11 @@ export interface PlannedTaskSegment {
   endTime: string;         // HH:mm
 }
 
+export interface PatternSlot {
+  startTime: string;       // HH:mm
+  endTime: string;         // HH:mm
+}
+
 export interface PlannedTask {
   id: string;
   userId: string;
@@ -37,6 +42,7 @@ export interface PlannedTask {
   maxCount?: number;
   exceptions: PlannedTaskException[];
   segmentsForDate?: PlannedTaskSegment[];   // present on date-scoped GET responses
+  patternForDate?: PatternSlot[];           // recurring weekly slots for that date's weekday
   completedToday: boolean;
   currentCount: number;
   notifyAtStart?: boolean;

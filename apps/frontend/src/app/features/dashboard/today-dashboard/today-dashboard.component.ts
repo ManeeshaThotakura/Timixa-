@@ -53,6 +53,21 @@ import { FabComponent } from '../../../shared/components/fab/fab.component';
         </div>
       </section>
 
+      <!-- View all tasks -->
+      <section class="mb-stack-lg">
+        <button type="button"
+                (click)="openAllTasks()"
+                class="w-full bg-surface-container-lowest rounded-[20px] p-4 flex items-center gap-3 shadow-card active:scale-[0.99] transition-transform"
+                data-testid="view-all-tasks">
+          <span class="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
+                style="background:rgba(94,67,251,0.10); color:#5e43fb;">
+            <span class="material-symbols-outlined text-[20px]">list_alt</span>
+          </span>
+          <span class="flex-1 text-left font-semibold text-on-surface">View all tasks</span>
+          <span class="material-symbols-outlined text-on-surface-variant">chevron_right</span>
+        </button>
+      </section>
+
       <!-- Unscheduled banner -->
       <section *ngIf="unscheduledToday().length" class="mb-stack-lg" data-testid="unscheduled-banner">
         <button type="button"
@@ -463,6 +478,8 @@ export class TodayDashboardComponent implements OnInit, OnDestroy {
   }
 
   openNewTask(): void { this.router.navigate(['/new-task']); }
+
+  openAllTasks(): void { this.router.navigate(['/tasks']); }
 
   completePlanned(id: string): void {
     this.plannedTasks.complete(id).subscribe();
